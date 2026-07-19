@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-CnHMSyzm.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-5sj377wZ.css">
+  <script type="module" crossorigin src="./assets/index-U2VBlEEj.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-w_upP7jo.css">
 </head>
 <body>
 
@@ -68,19 +68,17 @@
   <input type="range" id="bp" min="12" max="55" value="50" />
   <div class="ends"><span>near top</span><span>middle</span></div>
 
-  <label>Turn the page when my eyes reach… <span class="val" id="rtv"></span></label>
-  <input type="range" id="rt" min="40" max="88" value="62" />
-  <div class="ends"><span>mid-line</span><span>line end</span></div>
+  <div id="rightZoneRow">
+    <label>Turn the page when my eyes reach… <span class="val" id="rtv"></span></label>
+    <input type="range" id="rt" min="40" max="88" value="62" />
+    <div class="ends"><span>mid-line</span><span>line end</span></div>
+  </div>
 
   <div class="group">How it scrolls</div>
 
   <label>Page scroll speed <span class="val" id="spv"></span></label>
   <input type="range" id="sp" min="60" max="1000" value="360" />
   <div class="ends"><span>slow</span><span>fast</span></div>
-
-  <label>Motion smoothness <span class="val" id="smv"></span></label>
-  <input type="range" id="sm" min="3" max="40" value="12" />
-  <div class="ends"><span>snappy</span><span>smooth</span></div>
 
   <label>Wait before turning <span class="val" id="hdv"></span></label>
   <input type="range" id="hd" min="0" max="1200" value="350" />
@@ -105,9 +103,16 @@
 
   <details>
     <summary>Advanced</summary>
-    <label>Ignore glances past the sides <span class="val" id="mgv"></span></label>
-    <input type="range" id="mg" min="0" max="30" value="6" />
-    <div class="ends"><span>less</span><span>more</span></div>
+    <div id="smoothnessRow">
+      <label>Eye-tracking smoothing <span class="val" id="smv"></span></label>
+      <input type="range" id="sm" min="3" max="40" value="12" />
+      <div class="ends"><span>snappy, more jitter</span><span>smooth, more lag</span></div>
+    </div>
+    <div id="sheetMarginRow">
+      <label>Ignore glances past the sides <span class="val" id="mgv"></span></label>
+      <input type="range" id="mg" min="0" max="30" value="6" />
+      <div class="ends"><span>less</span><span>more</span></div>
+    </div>
     <button id="autoFrameToggle" class="on">🔍 Auto-frame face: on</button>
     <label>Camera zoom (manual — turn Auto-frame off) <span class="val" id="czv"></span></label>
     <input type="range" id="cz" min="100" max="300" value="100" />
