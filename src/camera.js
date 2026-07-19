@@ -131,6 +131,13 @@ function predict() {
   // unclamped screen-fraction coordinates, or null if there's nothing to
   // report this frame (blinking, not calibrated, no wink held, etc).
   const result = getActiveTracking().onFrame(lm, res, PROC_W, PROC_H);
+  if (state.trackingType === 'wink') {
+    // Live readout so wink strength/reliability can be tuned by eye instead
+    // of guesswork — scores are MediaPipe's eyeBlinkLeft/eyeBlinkRight
+    // (0 = open, 1 = fully closed).
+    $('wkL').textContent = state.winkScores.left.toFixed(2);
+    $('wkR').textContent = state.winkScores.right.toFixed(2);
+  }
   if (result) {
     const sx = Math.min(1, Math.max(0, result.ux)), sy = Math.min(1, Math.max(0, result.uy));
     const t = performance.now();

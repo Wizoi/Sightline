@@ -19,6 +19,7 @@ export function resetWinkTrackingState() { winkState = createWinkState(); }
 // changes needed there.
 export function onFrame(_lm, res) {
   const { left, right } = eyeBlinkScores(res);
+  state.winkScores = { left, right };   // live debug readout, shown in Setup
   const now = performance.now();
   const result = decideWink(winkState, { left, right, now, holdMs: WINK_HOLD_MS });
   winkState = result.state;

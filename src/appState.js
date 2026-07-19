@@ -23,6 +23,7 @@ export const state = {
 
   trackingType: 'wink',
   winkStrength: 0.5,
+  winkScores: { left: 0, right: 0 },   // live debug readout — see settings.js
 
   capturing: null,
   calibPoints: [],
