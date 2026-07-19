@@ -49,20 +49,26 @@ export async function startCamera() {
     $('camBtn').textContent = '🎥 Camera on';
     $('calibBtn').disabled = false;
 
-    // Restore saved calibration by default; flag if the setup looks different.
-    const saved = loadCalibration();
+    // Restore a saved iris calibration by default (only relevant if iris
+    // tracking is the active type); flag if the setup looks different.
+    const saved = getActiveTracking().needsCalibration ? loadCalibration() : null;
     if (saved && saved.model === calibModelId() && saved.coefX && saved.coefY && saved.gnorm) {
       state.coefX = saved.coefX; state.coefY = saved.coefY; state.gnorm = saved.gnorm;
       state.calibFp = saved.fp || null; state.calibrated = true;
-      $('runBtn').disabled = !canFollow();
       $('calibBtn').textContent = '🎯 Recalibrate';
       $('testBtn').disabled = false;
       const reasons = state.calibFp ? calibMismatch(state.calibFp, currentFingerprint()) : [];
       if (reasons.length) { showRecalBanner(reasons); setStatus('s-warn', 'calibration restored — ' + reasons[0]); }
       else setStatus('', 'calibration restored — ready');
-    } else {
+    } else if (getActiveTracking().needsCalibration) {
       setStatus('', 'camera on — calibrate next');
+    } else {
+      setStatus('', 'camera on — ready to follow');
     }
+    // Whichever branch ran above, re-check whether Follow-eyes can now be
+    // enabled — a tracking type that doesn't need calibration (e.g. wink
+    // tracking) should unlock it as soon as the camera (and a PDF) are ready.
+    $('runBtn').disabled = !canFollow();
     requestAnimationFrame(predict);
   } catch (e) {
     setStatus('s-bad', 'camera/model blocked — allow the camera, or serve via http://localhost');
