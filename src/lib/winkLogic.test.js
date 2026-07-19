@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createWinkState, decideWink } from './winkLogic.js';
 
-const OPEN = 0.3;   // a plausible "eye open" width ratio
-const CLOSED = 0.02; // a plausible "eye closed" width ratio
+const OPEN = 0.05;   // a plausible "eye open" blink score
+const CLOSED = 0.9;  // a plausible "eye closed" blink score
 const holdMs = 200;
 
 function run(frames) {
@@ -27,9 +27,9 @@ describe('decideWink', () => {
 
   it('commits a left wink once the left eye stays closed past the hold delay', () => {
     const r = run([
-      { left: OPEN, right: OPEN, now: 0 },      // establishes baseline
-      { left: CLOSED, right: OPEN, now: 10 },   // left starts closing
-      { left: CLOSED, right: OPEN, now: 250 },  // held past holdMs (200ms)
+      { left: OPEN, right: OPEN, now: 0 },
+      { left: CLOSED, right: OPEN, now: 10 },
+      { left: CLOSED, right: OPEN, now: 250 },
     ]);
     expect(r.wink).toBe('left');
   });
@@ -79,5 +79,14 @@ describe('decideWink', () => {
       { left: OPEN, right: OPEN, now: 400 },   // released
     ]);
     expect(r.wink).toBeNull();
+  });
+
+  it('treats a borderline score right at the threshold as open (>= counts as closed)', () => {
+    const r = run([
+      { left: OPEN, right: OPEN, now: 0 },
+      { left: 0.5, right: OPEN, now: 10 },
+      { left: 0.5, right: OPEN, now: 300 },
+    ]);
+    expect(r.wink).toBe('left');
   });
 });

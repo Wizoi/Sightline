@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   vsub, vadd, vscl, vdot, vcross, vnorm,
-  headBasis, eyeGaze, eyeRatios, blendVec, eyeOpenness,
+  headBasis, eyeGaze, eyeRatios, blendVec, eyeBlinkScores,
 } from './gazeMath.js';
 
 const W = 640, H = 480;
@@ -10,7 +10,7 @@ const W = 640, H = 480;
 // and chin/forehead are arranged so headBasis works out to a clean identity
 // basis (right=+x, down=+y, fwd=+z), and both irises sit exactly at the
 // midpoint of their eye corners (i.e. "looking straight ahead").
-function makeLandmarks({ irisOffsetX = 0, leftLidGap = 0.04, rightLidGap = 0.04 } = {}) {
+function makeLandmarks({ irisOffsetX = 0 } = {}) {
   const lm = Array.from({ length: 478 }, () => ({ x: 0, y: 0, z: 0 }));
   const set = (i, x, y, z = 0) => { lm[i] = { x, y, z }; };
 
@@ -23,15 +23,15 @@ function makeLandmarks({ irisOffsetX = 0, leftLidGap = 0.04, rightLidGap = 0.04 
   set(33, 0.35, 0.5);
   set(133, 0.45, 0.5);
   set(468, 0.40 + irisOffsetX, 0.5);
-  set(159, 0.40, 0.5 - leftLidGap / 2); // upper lid
-  set(145, 0.40, 0.5 + leftLidGap / 2); // lower lid
+  set(159, 0.40, 0.48); // upper lid
+  set(145, 0.40, 0.52); // lower lid
 
   // right eye: inner 362, outer 263, iris 473
   set(263, 0.65, 0.5);
   set(362, 0.55, 0.5);
   set(473, 0.60 + irisOffsetX, 0.5);
-  set(386, 0.60, 0.5 - rightLidGap / 2); // upper lid
-  set(374, 0.60, 0.5 + rightLidGap / 2); // lower lid
+  set(386, 0.60, 0.48); // upper lid
+  set(374, 0.60, 0.52); // lower lid
 
   return lm;
 }
@@ -106,21 +106,21 @@ describe('eyeRatios', () => {
   });
 });
 
-describe('eyeOpenness', () => {
-  it('reports roughly equal openness for two open eyes', () => {
-    const { left, right } = eyeOpenness(makeLandmarks());
-    expect(left).toBeCloseTo(right, 6);
-    expect(left).toBeGreaterThan(0);
+describe('eyeBlinkScores', () => {
+  it('returns zeros when blendshapes are absent', () => {
+    expect(eyeBlinkScores({})).toEqual({ left: 0, right: 0 });
   });
 
-  it('detects a closed left eye independently of the right', () => {
-    const { left, right } = eyeOpenness(makeLandmarks({ leftLidGap: 0.002 }));
-    expect(left).toBeLessThan(right * 0.2);
-  });
-
-  it('detects a closed right eye independently of the left', () => {
-    const { left, right } = eyeOpenness(makeLandmarks({ rightLidGap: 0.002 }));
-    expect(right).toBeLessThan(left * 0.2);
+  it('reads eyeBlinkLeft/eyeBlinkRight independently', () => {
+    const res = {
+      faceBlendshapes: [{
+        categories: [
+          { categoryName: 'eyeBlinkLeft', score: 0.92 },
+          { categoryName: 'eyeBlinkRight', score: 0.03 },
+        ],
+      }],
+    };
+    expect(eyeBlinkScores(res)).toEqual({ left: 0.92, right: 0.03 });
   });
 });
 

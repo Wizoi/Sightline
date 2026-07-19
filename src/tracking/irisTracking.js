@@ -3,7 +3,7 @@ import { eyeRatios, blendVec } from '../lib/gazeMath.js';
 import { applyX, applyY } from '../lib/calibrationModel.js';
 
 export const id = 'iris';
-export const label = 'Iris tracking (MediaPipe)';
+export const label = 'Iris tracking';
 export const needsCalibration = true;
 
 // Per frame: extract pose-invariant eye-direction features, blink-gate them

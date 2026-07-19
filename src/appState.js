@@ -21,7 +21,7 @@ export const state = {
   driftOn: false,
   snapOn: false,
 
-  trackingType: 'iris',
+  trackingType: 'wink',
   winkStrength: 0.5,
 
   capturing: null,

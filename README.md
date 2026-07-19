@@ -64,8 +64,8 @@ kept except your saved settings (which live only in your browser).
 ## Using Sightline
 
 **Tracking type** (in Setup) picks how Sightline reads your intent to turn the page:
-- **Iris tracking** (default) — watches where your eyes point, via the 9-point calibration described above.
-- **Wink tracking** — no calibration needed. Wink your **left** eye to scroll up, your **right** eye to scroll down; a *blink* (both eyes together) is ignored, only a one-eyed wink counts. **Wink scroll strength** controls how firm a push each wink gives.
+- **Wink tracking** (default) — no calibration needed. Wink your **left** eye to scroll up, your **right** eye to scroll down; a *blink* (both eyes together) is ignored, only a one-eyed wink counts. **Wink scroll strength** controls how firm a push each wink gives.
+- **Iris tracking** — watches where your eyes point, via the 9-point calibration described above.
 
 Switching tracking types is instant — pick whichever is more reliable for your face/lighting/glasses.
 

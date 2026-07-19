@@ -1,31 +1,25 @@
 // Pure wink-detection state machine: distinguishes a deliberate one-eyed wink
-// (one eye's openness drops well below its own baseline while the other eye
-// stays near its baseline) from an involuntary blink (both eyes drop
-// together — explicitly ignored) or ordinary camera noise, and debounces a
-// wink hold before committing to it. Mirrors followLogic.decide()'s
-// hold-before-commit pattern so a quick/stray wink can't misfire.
+// (one eye's blink score crosses the closed threshold while the other stays
+// open) from an involuntary blink (both eyes closing together — explicitly
+// ignored), and debounces a wink hold before committing to it. Mirrors
+// followLogic.decide()'s hold-before-commit pattern so a quick/stray wink
+// can't misfire.
+//
+// left/right are MediaPipe's per-eye blink blendshape scores (0 = open,
+// 1 = fully closed — see lib/gazeMath.js's eyeBlinkScores), already
+// model-normalized, so no baseline learning is needed here.
 
-const CLOSED_RATIO = 0.5;   // an eye counts as "closed" below this fraction of its own open baseline
-const BASELINE_EMA = 0.03;  // slow tracking of each eye's normal "open" width
+const CLOSED_THRESHOLD = 0.5;
 
 export function createWinkState() {
-  return { leftBaseline: null, rightBaseline: null, candidate: null, since: 0 };
+  return { candidate: null, since: 0 };
 }
 
-// input: { left, right, now, holdMs } — left/right are this frame's per-eye
-// openness (see lib/gazeMath.js's eyeOpenness).
+// input: { left, right, now, holdMs }
 export function decideWink(state, input) {
   const { left, right, now, holdMs } = input;
-  let leftBaseline = state.leftBaseline == null ? left : state.leftBaseline;
-  let rightBaseline = state.rightBaseline == null ? right : state.rightBaseline;
-
-  const leftClosed = left < CLOSED_RATIO * leftBaseline;
-  const rightClosed = right < CLOSED_RATIO * rightBaseline;
-
-  // Only drift the baseline while that eye looks normally open, so holding a
-  // wink doesn't slowly redefine "open" as "closed" out from under itself.
-  if (!leftClosed) leftBaseline += BASELINE_EMA * (left - leftBaseline);
-  if (!rightClosed) rightBaseline += BASELINE_EMA * (right - rightBaseline);
+  const leftClosed = left >= CLOSED_THRESHOLD;
+  const rightClosed = right >= CLOSED_THRESHOLD;
 
   let nextCandidate = null;
   if (leftClosed && !rightClosed) nextCandidate = 'left';
@@ -36,7 +30,7 @@ export function decideWink(state, input) {
   const committed = nextCandidate && (now - nextSince) >= holdMs ? nextCandidate : null;
 
   return {
-    state: { leftBaseline, rightBaseline, candidate: nextCandidate, since: nextSince },
+    state: { candidate: nextCandidate, since: nextSince },
     wink: committed,
   };
 }

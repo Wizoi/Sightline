@@ -33,21 +33,10 @@ export function eyeOpen(lm, up, lo, outer, inner) {
   return Math.hypot(lm[lo].x - lm[up].x, lm[lo].y - lm[up].y) / w;
 }
 
-// Per-eye openness (width-normalized eyelid gap), kept separate rather than
-// averaged — used to tell a deliberate one-eyed wink (one eye closes, the
-// other stays open) apart from a normal two-eyed blink.
-export function eyeOpenness(lm) {
-  return {
-    left: eyeOpen(lm, 159, 145, 33, 133),
-    right: eyeOpen(lm, 386, 374, 263, 362),
-  };
-}
-
 // Gaze features: pose-invariant yaw/pitch (usePose) OR 2D width-normalized
 // iris ratios. Plus eye openness (for blink gating).
 export function eyeRatios(lm, usePose, w, h) {
-  const { left, right } = eyeOpenness(lm);
-  const open = (left + right) / 2;
+  const open = (eyeOpen(lm, 159, 145, 33, 133) + eyeOpen(lm, 386, 374, 263, 362)) / 2;
   if (usePose) {
     const B = headBasis(lm, w, h);
     const L = eyeGaze(lm, 468, 33, 133, B, w, h), R = eyeGaze(lm, 473, 263, 362, B, w, h);
@@ -73,4 +62,17 @@ export function blendVec(res) {
   const inn = ((g.eyeLookInLeft || 0) + (g.eyeLookInRight || 0)) / 2;
   const out = ((g.eyeLookOutLeft || 0) + (g.eyeLookOutRight || 0)) / 2;
   return { bH: out - inn, bV: dn - up };
+}
+
+// Per-eye blink/closure scores (0 = open, 1 = fully closed) straight from
+// MediaPipe's blendshapes — a purpose-built, model-computed signal for "is
+// this eye closed," and much more robust than inferring it from raw eyelid
+// landmark distances (which are noisy enough that a deliberate wink can fail
+// to clear a fixed threshold). Used for wink detection.
+export function eyeBlinkScores(res) {
+  const cats = res.faceBlendshapes && res.faceBlendshapes[0] && res.faceBlendshapes[0].categories;
+  if (!cats) return { left: 0, right: 0 };
+  const g = {};
+  for (const c of cats) g[c.categoryName] = c.score;
+  return { left: g.eyeBlinkLeft || 0, right: g.eyeBlinkRight || 0 };
 }
