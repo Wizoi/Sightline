@@ -23,7 +23,10 @@ const CLOSED_THRESHOLD = 0.3;
 // between the two eyes' scores — not just one crossing a fixed line —
 // rejects "both elevated, one a bit more" (a blink) while still accepting a
 // real wink (one eye closed, the other still near its resting baseline).
-const GAP_THRESHOLD = 0.15;
+// Kept low: 0.15 was found to make a real, comfortably-over-threshold wink
+// on one side fail to register at all when that eye's score runs close to
+// the other eye's during the attempt (asymmetric eyes are common).
+const GAP_THRESHOLD = 0.08;
 
 export function createWinkState() {
   return { candidate: null, since: 0 };

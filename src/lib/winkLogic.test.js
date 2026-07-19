@@ -96,9 +96,9 @@ describe('decideWink', () => {
     // a clear enough gap over the other to count as a deliberate wink.
     const r = run([
       { left: OPEN, right: OPEN, now: 0 },
-      { left: 0.35, right: 0.25, now: 10 },
+      { left: 0.35, right: 0.32, now: 10 },
       { left: 0.4, right: 0.38, now: 100 },
-      { left: 0.35, right: 0.25, now: 300 },
+      { left: 0.35, right: 0.32, now: 300 },
     ]);
     expect(r.wink).toBeNull();
   });
@@ -108,6 +108,20 @@ describe('decideWink', () => {
       { left: OPEN, right: OPEN, now: 0 },
       { left: 0.6, right: 0.15, now: 10 },  // gap 0.45, comfortably over GAP_THRESHOLD
       { left: 0.6, right: 0.15, now: 300 },
+    ]);
+    expect(r.wink).toBe('left');
+  });
+
+  it('triggers on a marginal gap that an overly strict threshold would miss', () => {
+    // Regression: a first pass at this used a 0.15 gap requirement, which
+    // made a real, comfortably-over-CLOSED_THRESHOLD wink fail to register
+    // at all whenever the two eyes' scores ran close together for that
+    // person/camera setup (asymmetric eyes are common). 0.08 still rejects
+    // clear blinks (see above) while accepting this.
+    const r = run([
+      { left: OPEN, right: OPEN, now: 0 },
+      { left: 0.35, right: 0.25, now: 10 },  // gap 0.10 — used to be rejected
+      { left: 0.35, right: 0.25, now: 300 },
     ]);
     expect(r.wink).toBe('left');
   });

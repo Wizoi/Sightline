@@ -43,6 +43,7 @@
       <input type="range" id="ws" min="0" max="100" value="50" />
       <div class="ends"><span>gentle</span><span>strong</span></div>
       <div class="ends" id="winkDebug"><span>left eye: <span class="val" id="wkL">–</span></span><span>right eye: <span class="val" id="wkR">–</span></span></div>
+      <button id="winkTestBtn">🎯 Test wink detection</button>
     </div>
   </details>
 
@@ -156,6 +157,26 @@
     <div class="row">
       <button id="accRecal">Recalibrate</button>
       <button id="accClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="winkTest">
+  <div class="msg" id="winkTestMsg"></div>
+  <div id="winkTestIntro">
+    <p>Checks each eye independently. When prompted, hold that eye's wink for the whole countdown — the other eye should stay relaxed and open. Takes about 8 seconds.</p>
+    <button id="winkTestStart">Start test</button>
+  </div>
+</div>
+
+<div id="winkTestRes">
+  <div class="box">
+    <h2 id="winkTestGrade"></h2>
+    <div class="nums" id="winkTestNums"></div>
+    <ul id="winkTestSug"></ul>
+    <div class="row">
+      <button id="winkTestRetry">Test again</button>
+      <button id="winkTestClose">Close</button>
     </div>
   </div>
 </div>

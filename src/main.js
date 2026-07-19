@@ -6,6 +6,7 @@ import { startCamera } from './camera.js';
 import { runCalibration, recenter, currentFingerprint } from './calibration.js';
 import { calibMismatch } from './lib/calibrationModel.js';
 import { runAccuracyTest, beginAccuracySequence } from './accuracyTest.js';
+import { runWinkTest, beginWinkTestSequence } from './winkTest.js';
 import { startFollowLoop, clearSnapTarget } from './followController.js';
 import { initSettingsUI, loadSettings } from './settings.js';
 
@@ -35,13 +36,17 @@ $('testBtn').onclick = runAccuracyTest;
 $('accStart').onclick = beginAccuracySequence;
 $('accRecal').onclick = () => { $('accres').style.display = 'none'; runCalibration(); };
 $('accClose').onclick = () => { $('accres').style.display = 'none'; };
+$('winkTestBtn').onclick = runWinkTest;
+$('winkTestStart').onclick = beginWinkTestSequence;
+$('winkTestRetry').onclick = () => { $('winkTestRes').style.display = 'none'; runWinkTest(); };
+$('winkTestClose').onclick = () => { $('winkTestRes').style.display = 'none'; };
 $('recalNow').onclick = () => { hideRecalBanner(); runCalibration(); };
 $('recalDismiss').onclick = hideRecalBanner;
 
 // Foot pedal / mouse click anywhere on the score = pause toggle
 // (clicks on the control panel and overlays are ignored).
 document.addEventListener('mousedown', (e) => {
-  if (e.target.closest && e.target.closest('#panel, #calib, #acctest, #accres, #recal')) return;
+  if (e.target.closest && e.target.closest('#panel, #calib, #acctest, #accres, #winkTest, #winkTestRes, #recal')) return;
   if (!$('runBtn').disabled) $('runBtn').click();
 });
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {

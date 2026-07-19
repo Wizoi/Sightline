@@ -182,4 +182,20 @@ summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 #accres .row button:hover { border-color: var(--accent); }
 .accbar { height: 8px; border-radius: 4px; background: #30363d; overflow: hidden; margin: 8px 0 2px; }
 .accbar > span { display: block; height: 100%; }
+
+/* --- Wink detection test ---------------------------------------------- */
+#winkTest { position: fixed; inset: 0; background: rgba(5,8,12,0.92); z-index: 40; display: none; }
+#winkTest .msg { position: absolute; top: 24px; left: 0; right: 0; text-align: center; color: var(--ink); font-size: 16px; }
+#winkTestIntro { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, 90vw); text-align: center; background: var(--panel); border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+#winkTestIntro p { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+#winkTestIntro button { padding: 10px 22px; background: var(--accent); color: #04222e; border: 0; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+#winkTestRes { position: fixed; inset: 0; background: rgba(5,8,12,0.9); z-index: 45; display: none; align-items: center; justify-content: center; }
+#winkTestRes .box { background: var(--panel); border: 1px solid #30363d; border-radius: 12px; padding: 22px; width: min(460px, 92vw); }
+#winkTestRes h2 { margin: 0 0 6px; font-size: 20px; }
+#winkTestRes .nums { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+#winkTestRes ul { margin: 0 0 14px; padding-left: 18px; }
+#winkTestRes li { margin: 6px 0; }
+#winkTestRes .row { display: flex; gap: 8px; }
+#winkTestRes .row button { flex: 1; padding: 9px; background: #21262d; color: var(--ink); border: 1px solid #30363d; border-radius: 8px; cursor: pointer; }
+#winkTestRes .row button:hover { border-color: var(--accent); }
 kbd { background:#21262d; border:1px solid #30363d; border-bottom-width:2px; border-radius:4px; padding:1px 5px; font-size:11px; }
