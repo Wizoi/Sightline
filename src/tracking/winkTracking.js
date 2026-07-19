@@ -6,12 +6,11 @@ export const id = 'wink';
 export const label = 'Wink tracking (left eye = up, right eye = down)';
 export const needsCalibration = false;
 
-// Just long enough to filter a single noisy frame — the real "was this
-// deliberate" gate is followLogic.decide()'s own hold (cfg.holdMs, 350ms by
-// default), which runs after this on every synthesized wink point. Stacking
-// two full holds in sequence made a wink take the better part of a second
-// to register at all.
-const WINK_HOLD_MS = 60;
+// Long enough to filter a normal blink's brief eye-to-eye timing skew (they
+// rarely close in perfect lockstep), short enough not to stack badly with
+// followLogic.decide()'s own hold (cfg.holdMs, 350ms by default), which runs
+// after this on every synthesized wink point.
+const WINK_HOLD_MS = 120;
 
 let winkState = createWinkState();
 export function resetWinkTrackingState() { winkState = createWinkState(); }

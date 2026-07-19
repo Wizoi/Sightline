@@ -16,6 +16,15 @@
 // comfortably above resting noise and below a real wink's peak.
 const CLOSED_THRESHOLD = 0.3;
 
+// A threshold on one eye alone isn't enough: an ordinary two-eyed blink
+// rarely closes both eyes in perfect lockstep, so a brief moment where one
+// eye's score has risen past CLOSED_THRESHOLD while the other hasn't quite
+// caught up yet would otherwise misread as a wink. Requiring a clear gap
+// between the two eyes' scores — not just one crossing a fixed line —
+// rejects "both elevated, one a bit more" (a blink) while still accepting a
+// real wink (one eye closed, the other still near its resting baseline).
+const GAP_THRESHOLD = 0.15;
+
 export function createWinkState() {
   return { candidate: null, since: 0 };
 }
@@ -23,13 +32,13 @@ export function createWinkState() {
 // input: { left, right, now, holdMs }
 export function decideWink(state, input) {
   const { left, right, now, holdMs } = input;
-  const leftClosed = left >= CLOSED_THRESHOLD;
-  const rightClosed = right >= CLOSED_THRESHOLD;
+  const leftClosed = left >= CLOSED_THRESHOLD && (left - right) >= GAP_THRESHOLD;
+  const rightClosed = right >= CLOSED_THRESHOLD && (right - left) >= GAP_THRESHOLD;
 
   let nextCandidate = null;
   if (leftClosed && !rightClosed) nextCandidate = 'left';
   else if (rightClosed && !leftClosed) nextCandidate = 'right';
-  // both closed (blink) or both open -> nextCandidate stays null, ignored
+  // both closed together (blink) or neither clearly closed -> ignored
 
   const nextSince = nextCandidate !== state.candidate ? now : state.since;
   const committed = nextCandidate && (now - nextSince) >= holdMs ? nextCandidate : null;

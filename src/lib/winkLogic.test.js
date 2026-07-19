@@ -89,4 +89,26 @@ describe('decideWink', () => {
     ]);
     expect(r.wink).toBe('left');
   });
+
+  it('does not misread an imperfectly-synced blink as a wink', () => {
+    // Both eyes rise together (a blink), but not in perfect lockstep — one
+    // is a little ahead of the other. Neither crosses CLOSED_THRESHOLD with
+    // a clear enough gap over the other to count as a deliberate wink.
+    const r = run([
+      { left: OPEN, right: OPEN, now: 0 },
+      { left: 0.35, right: 0.25, now: 10 },
+      { left: 0.4, right: 0.38, now: 100 },
+      { left: 0.35, right: 0.25, now: 300 },
+    ]);
+    expect(r.wink).toBeNull();
+  });
+
+  it('still triggers when one eye is clearly closed and the other only mildly elevated', () => {
+    const r = run([
+      { left: OPEN, right: OPEN, now: 0 },
+      { left: 0.6, right: 0.15, now: 10 },  // gap 0.45, comfortably over GAP_THRESHOLD
+      { left: 0.6, right: 0.15, now: 300 },
+    ]);
+    expect(r.wink).toBe('left');
+  });
 });
