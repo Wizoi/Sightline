@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" width="120" alt="Sightline logo" />
+  <img src="public/logo.svg" width="120" alt="Sightline logo" />
 </p>
 
 <h1 align="center">Sightline</h1>
@@ -7,7 +7,7 @@
 <p align="center"><em>Turn the pages of your sheet music with your eyes — so both hands stay on your instrument.</em></p>
 
 <p align="center">
-  ✔ Single HTML file &nbsp;·&nbsp; ✔ Runs in your browser &nbsp;·&nbsp; ✔ Nothing uploaded &nbsp;·&nbsp; ✔ No install
+  ✔ Runs entirely in your browser &nbsp;·&nbsp; ✔ Nothing uploaded &nbsp;·&nbsp; ✔ No account &nbsp;·&nbsp; ✔ Free to host
 </p>
 
 ---
@@ -30,22 +30,19 @@ you. No pedals to tap, no hands off the instrument.
 - [Troubleshooting](#troubleshooting)
 - [Under the hood](#under-the-hood)
 - [Requirements](#requirements)
+- [Development](#development)
 - [Host your own copy](#host-your-own-copy)
 - [Credits & license](#credits--license)
 
 ## Try it
 
-**Online (nothing to download):** once this repo is published with GitHub Pages, it lives at
+**Online (nothing to download):** Sightline is hosted for free on GitHub Pages at
 **<https://wizoi.github.io/Sightline/>** — just open that link in Chrome or Edge on a
-computer with a webcam. (See [Host your own copy](#host-your-own-copy).)
+computer with a webcam. That's the recommended way to use it; no install, no build step,
+nothing to keep up to date yourself.
 
-**Run it yourself:** download `index.html`, then **double-click it**. It opens in your
-browser and works straight from your computer — Chrome and Edge will ask once for camera
-permission. That's the whole install. Because it's a single file, you can email it, drop it
-in a shared folder, or hand it to a stand partner and it just runs.
-
-*(One asterisk: on the very first run it fetches its two libraries from the internet, so you
-need to be online that first time. After that your browser caches them.)*
+Want to run your own copy or work on the code? See [Development](#development) and
+[Host your own copy](#host-your-own-copy).
 
 ## Quick start
 
@@ -65,6 +62,12 @@ sent anywhere. There is no account, no server, and no upload. Close the tab and 
 kept except your saved settings (which live only in your browser).
 
 ## Using Sightline
+
+**Tracking type** (in Setup) picks how Sightline reads your intent to turn the page:
+- **Iris tracking** (default) — watches where your eyes point, via the 9-point calibration described above.
+- **Wink tracking** — no calibration needed. Wink your **left** eye to scroll up, your **right** eye to scroll down; a *blink* (both eyes together) is ignored, only a one-eyed wink counts. **Wink scroll strength** controls how firm a push each wink gives.
+
+Switching tracking types is instant — pick whichever is more reliable for your face/lighting/glasses.
 
 **The reading band** is the horizontal stripe where your current line sits (shown by default).
 You choose where it sits on screen and how tall it is. You read within it; the page moves to
@@ -116,9 +119,9 @@ Webcam eye-tracking isn't laser-precise, but a good setup makes it reliable:
 
 ## Troubleshooting
 
-**The camera won't turn on.** Allow camera access when prompted. If a browser blocks it on a
-local file, run a tiny local server instead: `python -m http.server 8000` in the folder, then
-open `http://localhost:8000`. (Using the hosted GitHub Pages link avoids this entirely.)
+**The camera won't turn on.** Allow camera access when prompted. Camera access requires a
+secure context (HTTPS or `localhost`) — the hosted GitHub Pages link and `npm run dev` /
+`npm run preview` both satisfy that automatically.
 
 **It keeps scrolling when I look away.** That's tracking drift. Add light, tap <kbd>R</kbd> to
 recenter, or recalibrate — and use the pedal/spacebar pause when you glance away. Running
@@ -180,20 +183,56 @@ smoothly (or snaps) based on your gaze.
 
 - A **desktop or laptop with a webcam**.
 - **Chrome or Edge** (they support the camera and the face model well).
-- Internet access on **first load** (to fetch PDF.js and MediaPipe); offline after caching.
+- Internet access on **first load** (to fetch MediaPipe's face-tracking model and WASM
+  runtime — these are large ML assets loaded from Google's CDN rather than bundled; your
+  browser caches them after the first visit). PDF.js is bundled with the app itself.
 
 No sample scores are included — load your own PDF. (PDFs are git-ignored so your music never
 ends up in the repo.)
 
+## Development
+
+Sightline is a normal Vite-based static web app: plain JS modules, no framework, no server
+component. The build output is still just static HTML/CSS/JS — Node/npm are only needed to
+build it, not to run it.
+
+```bash
+npm install       # install dependencies
+npm run dev        # start a local dev server with hot reload
+npm test            # run the unit test suite (Vitest)
+npm run lint          # lint with ESLint
+npm run build           # production build → dist/
+npm run preview          # serve the production build locally
+```
+
+**Layout:**
+
+- `src/lib/` — pure, dependency-free logic (calibration math, gaze math, staff/system
+  detection, the follow-controller's decision logic). This is the part covered by unit
+  tests, colocated as `*.test.js` next to each module.
+- `src/` (top level) — the DOM-facing modules that wire that logic up to the page: camera
+  capture, calibration UI, PDF rendering, the accuracy test, settings/presets, and the
+  follow controller's per-frame loop.
+- `src/appState.js` — the shared runtime state (calibration, toggles, camera state) that
+  those modules read and write.
+
+Pushing to `main` runs the test suite and, if it passes, builds and publishes the app — see
+[Host your own copy](#host-your-own-copy).
+
 ## Host your own copy
 
-Because Sightline is one static file, **GitHub Pages** hosts it for free with a shareable HTTPS
-link (and HTTPS means the camera works anywhere, no local-server step):
+**GitHub Pages** hosts Sightline for free with a shareable HTTPS link (HTTPS means the camera
+works anywhere, no local-server step). A GitHub Actions workflow (`.github/workflows/deploy.yml`)
+builds the app and publishes it to a `gh-pages` branch on every push to `main`:
 
-1. Push this repo to GitHub.
+1. Push this repo to GitHub and push to `main` at least once (or trigger the *Deploy to GitHub
+   Pages* workflow manually) so the `gh-pages` branch gets created.
 2. On GitHub: **Settings → Pages**.
-3. Under *Build and deployment*, set **Source: Deploy from a branch**, **Branch: `main` / `root`**, and Save.
+3. Under *Build and deployment*, set **Source: Deploy from a branch**, **Branch: `gh-pages` /
+   `(root)`**, and Save.
 4. Wait a minute, then visit <https://wizoi.github.io/Sightline/>.
+
+From then on, every push to `main` that passes tests automatically redeploys.
 
 Share that link with anyone — they just open it and play.
 
