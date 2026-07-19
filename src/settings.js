@@ -68,12 +68,33 @@ function applyToggles(t) {
 }
 
 // Setup UI depends on whether the active Tracking Type needs a 9-point
-// calibration flow at all (iris tracking does; wink tracking doesn't).
+// calibration flow at all (iris tracking does; wink tracking doesn't), and
+// hides controls that provably do nothing under wink tracking:
+//   - Recenter / Drift: both only ever adjust or consume biasX/biasY, which
+//     winkTracking.js's synthesized point never reads or contributes to.
+//   - "Turn the page when my eyes reach…" (rightZoneFrac): only consulted
+//     inside decide()'s `inBand && smoothX > rightStart` branches, and a
+//     wink's synthetic point is deliberately always *outside* the band
+//     (that's what makes it trigger), so inBand is never true for it.
+//   - "Ignore glances past the sides" (sheetMargin): only gates the
+//     horizontal on-screen check against a fixed ux=0.5, which is always
+//     comfortably inside any reachable margin value.
+//   - Head-pose comp: only affects lib/gazeMath.eyeRatios, which wink
+//     tracking (lib/gazeMath.eyeBlinkScores) never calls.
+//   - Eye-tracking smoothing: smooths a continuously-varying gaze position;
+//     wink's point is a fixed target the instant a wink commits.
 function applyTrackingTypeUI() {
+  const isWink = state.trackingType === 'wink';
   const needsCalib = getActiveTracking().needsCalibration;
   $('calibBtn').style.display = needsCalib ? '' : 'none';
   $('testBtn').style.display = needsCalib ? '' : 'none';
-  $('winkStrengthRow').classList.toggle('hidden', state.trackingType !== 'wink');
+  $('winkStrengthRow').classList.toggle('hidden', !isWink);
+  $('smoothnessRow').classList.toggle('hidden', isWink);
+  $('recenterBtn').classList.toggle('hidden', isWink);
+  $('driftBtn').classList.toggle('hidden', isWink);
+  $('rightZoneRow').classList.toggle('hidden', isWink);
+  $('sheetMarginRow').classList.toggle('hidden', isWink);
+  $('poseToggle').classList.toggle('hidden', isWink);
   $('runBtn').disabled = !canFollow();
 }
 
