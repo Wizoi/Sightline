@@ -33,8 +33,13 @@ export function onFrame(_lm, res) {
   // strength 0 -> just past the dead-zone edge (still has to clear decide()'s
   // own hold timer, like a real gentle glance); strength 1 -> a strong push.
   const reach = 0.02 + 0.4 * state.winkStrength;
-  const uy = result.wink === 'left'
+  const rawUy = result.wink === 'left'
     ? cfg.bandPos - cfg.deadZoneFrac - reach
     : cfg.bandPos + cfg.deadZoneFrac + reach;
+  // Keep strictly inside (0, 1): decide()'s "looking away" check rejects
+  // gaze sitting exactly on the screen edge (rawGaze.y > 0 && < H), which a
+  // high wink strength could otherwise push this to exactly, at which point
+  // the wink would silently read as "looking away" instead of triggering.
+  const uy = Math.min(0.98, Math.max(0.02, rawUy));
   return { ux: 0.5, uy };
 }
