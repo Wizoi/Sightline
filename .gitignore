@@ -1,0 +1,16 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.tmp
+.vscode/
+.idea/
+
+# Music files — never publish scores or samples (often copyrighted)
+*.pdf
+
+# Dependencies / build (not used today, here for safety)
+node_modules/
+dist/
+*.log
