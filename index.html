@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sightline — hands-free sight-reading</title>
+<link rel="icon" type="image/svg+xml" href="./logo.svg" />
+  <script type="module" crossorigin src="./assets/index-Crfj9kFu.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-5sj377wZ.css">
+</head>
+<body>
+
+<div id="band"><div id="rightMark"></div></div>
+<div id="sysMarks"></div>
+<div id="score"></div>
+<video id="cam" playsinline muted></video>
+<canvas id="camview" width="180" height="135"></canvas>
+<div id="gaze"></div>
+<div id="rcTarget"></div>
+<div id="empty">Load a PDF to begin →<br><small style="font-size:12px">then Start camera &amp; Calibrate</small></div>
+
+<div id="panel">
+  <div id="panelHead">
+    <h1><svg class="logo" viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="56" r="30" fill="#4cc9f0"/><path d="M67,58 V38" stroke="#0e1116" stroke-width="5.5" stroke-linecap="round"/><ellipse cx="56" cy="60" rx="10.5" ry="8" fill="#0e1116" transform="rotate(-20 56 60)"/><circle cx="49" cy="45" r="7.5" fill="#ffffff"/><path d="M15,56 C24,24 96,24 105,56" fill="none" stroke="#4cc9f0" stroke-width="7" stroke-linecap="round"/><path d="M100,51 L114,44 M99,57 L115,55" stroke="#4cc9f0" stroke-width="4" stroke-linecap="round"/></svg>Sightline</h1>
+    <button id="minBtn" title="Collapse panel (M)">«</button>
+  </div>
+  <div class="sub">Read toward the right edge of the band → the page scrolls up to the next line.</div>
+
+  <input type="file" id="file" accept="application/pdf" style="display:none" />
+  <button id="loadBtn" class="primary">📄 Load PDF…</button>
+
+  <label>Music size (100% = fit page width) <span class="val" id="zmv"></span></label>
+  <input type="range" id="zm" min="40" max="140" value="100" />
+  <div class="ends"><span>smaller — see more</span><span>bigger</span></div>
+
+  <details id="configBox" open>
+    <summary>⚙ Setup — camera, calibrate, accuracy</summary>
+    <label>Tracking type</label>
+    <select id="trackingType"></select>
+    <button id="camBtn">🎥 Start camera</button>
+    <button id="calibBtn" disabled>🎯 Calibrate</button>
+    <button id="testBtn" disabled>📏 Check accuracy</button>
+    <div id="winkStrengthRow">
+      <label>Wink scroll strength <span class="val" id="wsv"></span></label>
+      <input type="range" id="ws" min="0" max="100" value="50" />
+      <div class="ends"><span>gentle</span><span>strong</span></div>
+    </div>
+  </details>
+
+  <div class="row">
+    <button id="runBtn" disabled>▶ Follow eyes</button>
+    <button id="showBand">Hide band</button>
+  </div>
+  <div class="row">
+    <button id="snapBtn">▦ Snap: off</button>
+    <button id="driftBtn">🎯 Drift: off</button>
+  </div>
+  <button id="recenterBtn">⌖ Recenter to band center (R)</button>
+
+  <div class="group">The reading band</div>
+
+  <label>Reading zone size <span class="val" id="dzv"></span></label>
+  <input type="range" id="dz" min="4" max="40" value="18" />
+  <div class="ends"><span>small</span><span>large</span></div>
+
+  <label>Where you read on screen <span class="val" id="bpv"></span></label>
+  <input type="range" id="bp" min="12" max="55" value="50" />
+  <div class="ends"><span>near top</span><span>middle</span></div>
+
+  <label>Turn the page when my eyes reach… <span class="val" id="rtv"></span></label>
+  <input type="range" id="rt" min="40" max="88" value="62" />
+  <div class="ends"><span>mid-line</span><span>line end</span></div>
+
+  <div class="group">How it scrolls</div>
+
+  <label>Page scroll speed <span class="val" id="spv"></span></label>
+  <input type="range" id="sp" min="60" max="1000" value="360" />
+  <div class="ends"><span>slow</span><span>fast</span></div>
+
+  <label>Motion smoothness <span class="val" id="smv"></span></label>
+  <input type="range" id="sm" min="3" max="40" value="12" />
+  <div class="ends"><span>snappy</span><span>smooth</span></div>
+
+  <label>Wait before turning <span class="val" id="hdv"></span></label>
+  <input type="range" id="hd" min="0" max="1200" value="350" />
+  <div class="ends"><span>instant</span><span>patient (ignores quick glances)</span></div>
+
+  <div class="row">
+    <button id="saveBtn">💾 Save settings</button>
+    <button id="defBtn">↺ Load defaults</button>
+  </div>
+
+  <details>
+    <summary>Presets (per piece)</summary>
+    <div class="row">
+      <input type="text" id="presetName" placeholder="Piece name…" />
+      <button id="presetSave">Save</button>
+    </div>
+    <div class="row">
+      <select id="presetSel"><option value="">— load preset —</option></select>
+      <button id="presetDel">Delete</button>
+    </div>
+  </details>
+
+  <details>
+    <summary>Advanced</summary>
+    <label>Ignore glances past the sides <span class="val" id="mgv"></span></label>
+    <input type="range" id="mg" min="0" max="30" value="6" />
+    <div class="ends"><span>less</span><span>more</span></div>
+    <button id="autoFrameToggle" class="on">🔍 Auto-frame face: on</button>
+    <label>Camera zoom (manual — turn Auto-frame off) <span class="val" id="czv"></span></label>
+    <input type="range" id="cz" min="100" max="300" value="100" />
+    <div class="ends"><span>1×</span><span>3×</span></div>
+    <button id="poseToggle" class="on">🧭 Head-pose comp: on</button>
+    <button id="webcamToggle">Toggle camera preview</button>
+    <button id="dotToggle">Toggle gaze dot</button>
+    <button id="showSys">Show detected systems</button>
+  </details>
+
+  <details>
+    <summary>Keyboard fallback</summary>
+    <div style="color:var(--muted);font-size:12px;margin-top:6px">
+      <kbd>Space</kbd> pause · <kbd>↑</kbd><kbd>↓</kbd> nudge · <kbd>C</kbd> calibrate · <kbd>R</kbd> recenter · <kbd>B</kbd> band · <kbd>M</kbd> minimize
+    </div>
+  </details>
+</div>
+
+<div id="hud">
+  <span class="dot" id="statusDot"></span><span id="statusText">idle</span>
+  &nbsp;·&nbsp; <span id="zoneText">–</span>
+  &nbsp;·&nbsp; scroll <span id="velText">0</span>/s
+</div>
+
+<div id="calib">
+  <div class="msg">Look at each red dot and click it <b>once</b>, holding your gaze until it turns green.<small>Do this in your real playing position. The overlay closes itself when all nine are green.</small></div>
+</div>
+
+<div id="acctest">
+  <div class="msg" id="accmsg"></div>
+  <div id="accdot"></div>
+  <div id="accintro">
+    <p>Sit as you would while playing. In a moment the dot will jump to 7 spots around the screen — just <b>look at it and hold your gaze</b> until it moves. Takes about 12 seconds.</p>
+    <button id="accStart">Start test</button>
+  </div>
+</div>
+
+<div id="accres">
+  <div class="box">
+    <h2 id="accgrade"></h2>
+    <div class="nums" id="accnums"></div>
+    <ul id="accsug"></ul>
+    <div class="row">
+      <button id="accRecal">Recalibrate</button>
+      <button id="accClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div id="recal">
+  <span id="recalMsg">Your setup changed — recalibrate for accuracy.</span>
+  <button id="recalNow">Recalibrate</button>
+  <button id="recalDismiss">Keep old</button>
+</div>
+
+</body>
+</html>
