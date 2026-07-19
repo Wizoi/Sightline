@@ -37,6 +37,7 @@ function currentToggles() {
     drift: state.driftOn, snap: state.snapOn, pose: state.usePose, auto: state.autoFrame,
     band: state.showBand, sys: state.showSys, cz: parseFloat($('cz').value),
     tracking: state.trackingType, winkStrength: state.winkStrength,
+    winkClosedThreshold: state.winkClosedThreshold, winkGapThreshold: state.winkGapThreshold,
   };
 }
 function applyToggles(t) {
@@ -64,6 +65,8 @@ function applyToggles(t) {
   $('snapBtn').textContent = '▦ Snap: ' + (state.snapOn ? 'on' + (state.systemCentersDoc.length ? ' (' + state.systemCentersDoc.length + ')' : '') : 'off');
 
   if (Number.isFinite(t.winkStrength)) { state.winkStrength = t.winkStrength; $('ws').value = Math.round(t.winkStrength * 100); $('wsv').textContent = Math.round(t.winkStrength * 100) + '%'; }
+  state.winkClosedThreshold = Number.isFinite(t.winkClosedThreshold) ? t.winkClosedThreshold : null;
+  state.winkGapThreshold = Number.isFinite(t.winkGapThreshold) ? t.winkGapThreshold : null;
   if (typeof t.tracking === 'string') { setTrackingType(t.tracking); $('trackingType').value = state.trackingType; applyTrackingTypeUI(); }
 }
 
@@ -98,9 +101,15 @@ function applyTrackingTypeUI() {
   $('runBtn').disabled = !canFollow();
 }
 
-function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ s: collectRaw(), t: currentToggles() })); toast('Settings saved'); }
-  catch (e) { toast('Could not save (storage blocked)'); }
+function saveSettings() { persistSettings(true); }
+// Used after wink calibration completes, so the result survives a reload
+// without requiring a separate trip to "Save settings" — mirrors how iris
+// calibration is saved automatically the moment it finishes.
+export function persistSettings(announce) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ s: collectRaw(), t: currentToggles() }));
+    if (announce) toast('Settings saved');
+  } catch (e) { if (announce) toast('Could not save (storage blocked)'); }
 }
 export function loadSettings() {
   try {
@@ -198,6 +207,12 @@ export function initSettingsUI() {
   $('trackingType').onchange = () => {
     setTrackingType($('trackingType').value);
     state.calibrated = false; state.coefX = state.coefY = null; state.gnorm = null;
+    state.capturing = null;
+    // If a calibration was left open mid-flow (started, then abandoned by
+    // switching tracking type instead of finishing it), it never otherwise
+    // gets hidden — it would just sit there, invisible only for as long as
+    // some higher-z-index overlay happened to be covering it.
+    $('calib').style.display = 'none';
     resetWinkTrackingState();
     $('calibBtn').textContent = '🎯 Calibrate';
     applyTrackingTypeUI();

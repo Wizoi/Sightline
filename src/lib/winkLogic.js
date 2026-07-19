@@ -13,8 +13,10 @@
 // 1.0 for a real, deliberate (non-exaggerated) wink — observed real-world
 // winks have peaked around ~0.45-0.5 against a resting baseline around
 // ~0.1, so 0.5 was too strict and silently never triggered. 0.3 sits
-// comfortably above resting noise and below a real wink's peak.
-const CLOSED_THRESHOLD = 0.3;
+// comfortably above resting noise and below a real wink's peak — a
+// reasonable default for someone who hasn't calibrated (see
+// lib/winkCalibration.js), which derives personal values instead.
+export const DEFAULT_CLOSED_THRESHOLD = 0.3;
 
 // A threshold on one eye alone isn't enough: an ordinary two-eyed blink
 // rarely closes both eyes in perfect lockstep, so a brief moment where one
@@ -25,18 +27,25 @@ const CLOSED_THRESHOLD = 0.3;
 // real wink (one eye closed, the other still near its resting baseline).
 // Kept low: 0.15 was found to make a real, comfortably-over-threshold wink
 // on one side fail to register at all when that eye's score runs close to
-// the other eye's during the attempt (asymmetric eyes are common).
-const GAP_THRESHOLD = 0.08;
+// the other eye's during the attempt (asymmetric eyes are common) — a
+// calibrated gapThreshold handles that per-person instead of guessing.
+export const DEFAULT_GAP_THRESHOLD = 0.08;
 
 export function createWinkState() {
   return { candidate: null, since: 0 };
 }
 
-// input: { left, right, now, holdMs }
+// input: { left, right, now, holdMs, closedThreshold?, gapThreshold? }
+// closedThreshold/gapThreshold default to the fixed values above but can be
+// overridden with values derived from lib/winkCalibration.js.
 export function decideWink(state, input) {
-  const { left, right, now, holdMs } = input;
-  const leftClosed = left >= CLOSED_THRESHOLD && (left - right) >= GAP_THRESHOLD;
-  const rightClosed = right >= CLOSED_THRESHOLD && (right - left) >= GAP_THRESHOLD;
+  const {
+    left, right, now, holdMs,
+    closedThreshold = DEFAULT_CLOSED_THRESHOLD,
+    gapThreshold = DEFAULT_GAP_THRESHOLD,
+  } = input;
+  const leftClosed = left >= closedThreshold && (left - right) >= gapThreshold;
+  const rightClosed = right >= closedThreshold && (right - left) >= gapThreshold;
 
   let nextCandidate = null;
   if (leftClosed && !rightClosed) nextCandidate = 'left';

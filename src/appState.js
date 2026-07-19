@@ -24,6 +24,9 @@ export const state = {
   trackingType: 'wink',
   winkStrength: 0.5,
   winkScores: { left: 0, right: 0 },   // live debug readout — see settings.js
+  // null = not calibrated, fall back to lib/winkLogic.js's fixed defaults.
+  winkClosedThreshold: null,
+  winkGapThreshold: null,
 
   capturing: null,
   calibPoints: [],

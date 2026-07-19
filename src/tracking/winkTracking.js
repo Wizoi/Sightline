@@ -25,7 +25,13 @@ export function onFrame(_lm, res) {
   const { left, right } = eyeBlinkScores(res);
   state.winkScores = { left, right };   // live debug readout, shown in Setup
   const now = performance.now();
-  const result = decideWink(winkState, { left, right, now, holdMs: WINK_HOLD_MS });
+  const result = decideWink(winkState, {
+    left, right, now, holdMs: WINK_HOLD_MS,
+    // Personal values from Calibrate wink sensitivity, when available —
+    // undefined here falls back to lib/winkLogic.js's fixed defaults.
+    closedThreshold: state.winkClosedThreshold ?? undefined,
+    gapThreshold: state.winkGapThreshold ?? undefined,
+  });
   winkState = result.state;
   if (!result.wink) return null;
 
