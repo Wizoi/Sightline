@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-DkkINPg2.js"></script>
+  <script type="module" crossorigin src="./assets/index-BfH9PX9n.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-CxG7AGFk.css">
 </head>
 <body>
@@ -45,7 +45,11 @@
       <input type="range" id="ws" min="0" max="100" value="50" />
       <div class="ends"><span>gentle</span><span>strong</span></div>
       <div class="ends" id="winkDebug"><span>left eye: <span class="val" id="wkL">–</span></span><span>right eye: <span class="val" id="wkR">–</span></span></div>
-      <button id="winkTestBtn">🎯 Test wink detection</button>
+      <button id="winkCalibrateBtn">🎯 Calibrate wink sensitivity</button>
+      <div class="row">
+        <button id="winkTestBtn">📏 Test wink detection</button>
+        <button id="winkResetBtn">↺ Reset</button>
+      </div>
     </div>
   </details>
 
@@ -166,8 +170,8 @@
 <div id="winkTest">
   <div class="msg" id="winkTestMsg"></div>
   <div id="winkTestIntro">
-    <p>Checks each eye independently. When prompted, hold that eye's wink for the whole countdown — the other eye should stay relaxed and open. Takes about 8 seconds.</p>
-    <button id="winkTestStart">Start test</button>
+    <p id="winkTestIntroText"></p>
+    <button id="winkTestStart">Start</button>
   </div>
 </div>
 
