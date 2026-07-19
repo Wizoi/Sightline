@@ -9,7 +9,12 @@
 // 1 = fully closed — see lib/gazeMath.js's eyeBlinkScores), already
 // model-normalized, so no baseline learning is needed here.
 
-const CLOSED_THRESHOLD = 0.5;
+// MediaPipe's eyeBlinkLeft/Right scores don't reliably reach anywhere near
+// 1.0 for a real, deliberate (non-exaggerated) wink — observed real-world
+// winks have peaked around ~0.45-0.5 against a resting baseline around
+// ~0.1, so 0.5 was too strict and silently never triggered. 0.3 sits
+// comfortably above resting noise and below a real wink's peak.
+const CLOSED_THRESHOLD = 0.3;
 
 export function createWinkState() {
   return { candidate: null, since: 0 };
