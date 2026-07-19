@@ -6,7 +6,12 @@ export const id = 'wink';
 export const label = 'Wink tracking (left eye = up, right eye = down)';
 export const needsCalibration = false;
 
-const WINK_HOLD_MS = 220;
+// Just long enough to filter a single noisy frame — the real "was this
+// deliberate" gate is followLogic.decide()'s own hold (cfg.holdMs, 350ms by
+// default), which runs after this on every synthesized wink point. Stacking
+// two full holds in sequence made a wink take the better part of a second
+// to register at all.
+const WINK_HOLD_MS = 60;
 
 let winkState = createWinkState();
 export function resetWinkTrackingState() { winkState = createWinkState(); }
