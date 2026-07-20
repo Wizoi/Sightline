@@ -38,6 +38,7 @@ function currentToggles() {
     band: state.showBand, sys: state.showSys, cz: parseFloat($('cz').value),
     tracking: state.trackingType, winkStrength: state.winkStrength,
     winkClosedThreshold: state.winkClosedThreshold, winkGapThreshold: state.winkGapThreshold,
+    bpm: state.autoScroll.bpm, beatsPerMeasure: state.autoScroll.beatsPerMeasure, tempoPct: state.autoScroll.tempoPct,
   };
 }
 function applyToggles(t) {
@@ -68,6 +69,10 @@ function applyToggles(t) {
   state.winkClosedThreshold = Number.isFinite(t.winkClosedThreshold) ? t.winkClosedThreshold : null;
   state.winkGapThreshold = Number.isFinite(t.winkGapThreshold) ? t.winkGapThreshold : null;
   if (typeof t.tracking === 'string') { setTrackingType(t.tracking); $('trackingType').value = state.trackingType; applyTrackingTypeUI(); }
+
+  if (Number.isFinite(t.bpm)) { state.autoScroll.bpm = t.bpm; $('bpmInput').value = t.bpm; $('bpmV').textContent = t.bpm + ' bpm'; }
+  if (Number.isFinite(t.beatsPerMeasure)) { state.autoScroll.beatsPerMeasure = t.beatsPerMeasure; $('beatsPerMeasure').value = t.beatsPerMeasure; $('beatsPerMeasureV').textContent = String(t.beatsPerMeasure); }
+  if (Number.isFinite(t.tempoPct)) { state.autoScroll.tempoPct = t.tempoPct; $('tempoPct').value = Math.round(t.tempoPct * 100); $('tempoPctV').textContent = Math.round(t.tempoPct * 100) + '%'; }
 }
 
 // Setup UI depends on whether the active Tracking Type needs a 9-point

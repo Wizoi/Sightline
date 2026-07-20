@@ -61,6 +61,20 @@ export const state = {
   rawGaze: null,
 
   systemCentersDoc: [],
+
+  // Time-based "karaoke" auto-scroll — independent of camera/tracking state
+  // above; see src/scoreAnalysis.js and src/autoScrollController.js.
+  autoScroll: {
+    analyzed: false,             // has "Analyze score" run for the current PDF?
+    systemBands: [],             // [{ center, rowMin, rowMax }] per system, doc px — from scoreAnalysis
+    measuresPerSystem: [],       // editable estimate, one entry per system
+    beatsPerMeasure: 4,
+    bpm: 100,
+    tempoPct: 1,                 // live playback-speed multiplier (0.5-1.5), independent of bpm
+    schedule: null,              // built from the above via lib/tempoSchedule.js when playback starts
+    playing: false,
+    scheduleElapsed: 0,          // accumulated schedule-time seconds elapsed — see autoScrollController.js
+  },
 };
 
 // Switching pose/flat feature space invalidates any saved calibration.

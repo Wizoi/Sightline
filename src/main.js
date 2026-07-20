@@ -9,8 +9,11 @@ import { runAccuracyTest, beginAccuracySequence } from './accuracyTest.js';
 import { runWinkCalibration, beginWinkCalibrationSequence } from './winkCalibrate.js';
 import { startFollowLoop, clearSnapTarget } from './followController.js';
 import { initSettingsUI, loadSettings } from './settings.js';
+import { initAutoScrollUI } from './autoScrollUI.js';
+import { startAutoScrollLoop } from './autoScrollController.js';
 
 initSettingsUI();
+initAutoScrollUI();
 
 /* ---------------------------------------------------------------------- *
  *  Primary controls
@@ -101,3 +104,4 @@ applyBand();
 $('showBand').textContent = state.showBand ? 'Hide band' : 'Show band';
 setStatus('', hadSaved ? 'saved settings loaded' : 'idle');
 startFollowLoop();
+startAutoScrollLoop();
