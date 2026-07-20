@@ -5,13 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-Ncug3tbs.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CxG7AGFk.css">
+  <script type="module" crossorigin src="./assets/index-D2PTd8kA.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BbKotdvq.css">
 </head>
 <body>
 
 <div id="band"><div id="rightMark"></div></div>
 <div id="sysMarks"></div>
+<div id="autoScrollHighlight"></div>
 <div id="score"></div>
 <video id="cam" playsinline muted></video>
 <canvas id="camview" width="180" height="135"></canvas>
@@ -102,6 +103,35 @@
     </div>
   </details>
 
+  <details id="autoScrollBox">
+    <summary>🎵 Auto-scroll (time-based)</summary>
+    <div class="sub">Scroll to where you want to start, analyze the score, confirm the tempo, then play — the page advances on its own, in time.</div>
+    <button id="analyzeScoreBtn">🎵 Analyze score</button>
+    <div id="autoScrollSummary" class="sub"></div>
+    <ul id="autoScrollWarnings"></ul>
+
+    <label>Time signature — beats per measure <span class="val" id="beatsPerMeasureV"></span></label>
+    <input type="range" id="beatsPerMeasure" min="1" max="12" value="4" />
+
+    <label>Tempo <span class="val" id="bpmV"></span></label>
+    <input type="range" id="bpmInput" min="30" max="240" value="100" />
+    <div class="ends"><span>slow</span><span>fast</span></div>
+
+    <details id="measuresDetails">
+      <summary>Measures per system (edit if a count looks wrong)</summary>
+      <div id="measuresList"></div>
+    </details>
+
+    <div class="row">
+      <button id="autoScrollStart" disabled>▶ Start auto-scroll</button>
+      <button id="autoScrollPause" disabled>⏸ Pause</button>
+    </div>
+
+    <label>Playback speed <span class="val" id="tempoPctV"></span></label>
+    <input type="range" id="tempoPct" min="50" max="150" value="100" />
+    <div class="ends"><span>slower</span><span>faster</span></div>
+  </details>
+
   <details>
     <summary>Advanced</summary>
     <div id="smoothnessRow">
@@ -136,6 +166,7 @@
   <span class="dot" id="statusDot"></span><span id="statusText">idle</span>
   &nbsp;·&nbsp; <span id="zoneText">–</span>
   &nbsp;·&nbsp; scroll <span id="velText">0</span>/s
+  <span id="tempoHud">&nbsp;·&nbsp; 🎵 <span id="tempoText"></span></span>
 </div>
 
 <div id="calib">
