@@ -7,6 +7,10 @@ desktop.ini
 .vscode/
 .idea/
 
+# Claude Code: personal, machine-specific tool-permission allowlist —
+# not shared project config (.claude/agents, skills, settings.json are).
+.claude/settings.local.json
+
 # Music files — never publish scores or samples (often copyrighted)
 *.pdf
 
