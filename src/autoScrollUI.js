@@ -2,6 +2,7 @@ import { state } from './appState.js';
 import { $, toast, setStatus } from './ui.js';
 import { analyzeScore } from './scoreAnalysis.js';
 import { startAutoScroll, pauseAutoScroll, stopAutoScroll, currentTempoLabel } from './autoScrollController.js';
+import { startLiveTempo, stopLiveTempo } from './liveTempo.js';
 
 export function initAutoScrollUI() {
   $('beatsPerMeasure').addEventListener('input', () => {
@@ -46,6 +47,22 @@ export function initAutoScrollUI() {
     $('autoScrollStart').disabled = false;
     $('autoScrollPause').disabled = true;
     setStatus('', 'auto-scroll paused');
+  };
+
+  $('liveTempoToggle').onclick = async () => {
+    const as = state.autoScroll;
+    if (!as.liveTempoEnabled) {
+      as.liveTempoEnabled = true;
+      $('liveTempoToggle').classList.add('on');
+      await startLiveTempo();
+      // startLiveTempo() flips liveTempoEnabled back off itself if mic
+      // access failed — reflect that back into the button state.
+      if (!as.liveTempoEnabled) $('liveTempoToggle').classList.remove('on');
+    } else {
+      as.liveTempoEnabled = false;
+      $('liveTempoToggle').classList.remove('on');
+      stopLiveTempo();
+    }
   };
 
   if (state.autoScroll.analyzed) renderSummary({ systemCount: state.autoScroll.systemBands.length, warnings: [] });

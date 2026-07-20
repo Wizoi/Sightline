@@ -56,3 +56,32 @@ export function nearestSystemIndex(systemCentersDoc, scrollDocY) {
   });
   return best;
 }
+
+// Flat list of expected beat timestamps across the whole schedule (each
+// system's duration divided evenly across its measures x beatsPerMeasure
+// beats) — the "when should a note happen" reference lib/tempoCorrection.js
+// compares live onsets against for the live-tempo-correction feature.
+export function beatTimestamps(schedule, beatsPerMeasure) {
+  const out = [];
+  for (const s of schedule.systems) {
+    const totalBeats = s.measures * beatsPerMeasure;
+    if (totalBeats <= 0) continue;
+    const beatDur = s.duration / totalBeats;
+    for (let b = 0; b < totalBeats; b++) out.push(s.start + b * beatDur);
+  }
+  return out;
+}
+
+// The expected beat timestamp nearest to elapsed time t. A plain linear
+// scan is fine here: beat lists top out in the hundreds for a typical
+// piece, and this only runs once per detected onset (at most a few times a
+// second), not per animation frame.
+export function nearestBeatTime(beats, t) {
+  if (!beats.length) return null;
+  let best = beats[0], bestDist = Math.abs(t - beats[0]);
+  for (const b of beats) {
+    const d = Math.abs(t - b);
+    if (d < bestDist) { bestDist = d; best = b; }
+  }
+  return best;
+}

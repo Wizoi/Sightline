@@ -1,6 +1,14 @@
 import { cfg, state } from './appState.js';
 import { $, toast, setStatus } from './ui.js';
 import { buildSchedule, progressWithinSystem, nearestSystemIndex } from './lib/tempoSchedule.js';
+import { decayIfQuiet, correctionStatus } from './lib/tempoCorrection.js';
+
+const LIVE_STATUS_LABEL = {
+  off: '',
+  listening: '🎤 listening…',
+  tracking: '🎤 tracking tempo',
+  'no signal': '🎤 no signal — check mic',
+};
 
 // Time-based "karaoke" auto-scroll playback loop — a requestAnimationFrame
 // loop parallel to followController.js's tick(), but driven by elapsed
@@ -44,13 +52,15 @@ function hideHighlight() {
   if (el) el.style.display = 'none';
 }
 
-// The BPM actually driving playback right now (base BPM x the live tempo%
-// nudge) — surfaced in the HUD so it's an inspectable number, not a
-// set-and-forget one. Exported so settings.js can also refresh it
-// immediately on slider input, not just during playback.
+// The BPM actually driving playback right now (base BPM x the manual
+// playback-speed slider x the live tempo correction, if enabled) —
+// surfaced in the HUD so it's an inspectable number, not a set-and-forget
+// one. Exported so settings.js can also refresh it immediately on slider
+// input, not just during playback.
 export function currentTempoLabel() {
   const as = state.autoScroll;
-  return Math.round(as.bpm * as.tempoPct) + ' bpm';
+  const correction = as.liveTempoEnabled ? as.tempoCorrection.correction : 1;
+  return Math.round(as.bpm * as.tempoPct * correction) + ' bpm';
 }
 
 function tick(now) {
@@ -59,9 +69,21 @@ function tick(now) {
   lastFrame = now;
 
   const as = state.autoScroll;
+
+  const liveStatusEl = $('liveTempoStatus');
+  if (liveStatusEl) liveStatusEl.textContent = as.liveTempoEnabled ? (LIVE_STATUS_LABEL[as.liveTempoStatus] || '') : '';
+
   if (!as.playing || !as.schedule) return;
 
-  as.scheduleElapsed += dt * as.tempoPct;
+  const liveCorrection = as.liveTempoEnabled ? as.tempoCorrection.correction : 1;
+  as.scheduleElapsed += dt * as.tempoPct * liveCorrection;
+
+  if (as.liveTempoEnabled) {
+    const beatDuration = as.bpm > 0 ? 60 / as.bpm : 0;
+    as.tempoCorrection = decayIfQuiet(as.tempoCorrection, as.scheduleElapsed, dt, { beatDuration });
+    as.liveTempoStatus = correctionStatus(as.tempoCorrection, as.scheduleElapsed, { beatDuration });
+  }
+
   let reachedEnd = false;
   if (as.scheduleElapsed >= as.schedule.totalDuration) {
     as.scheduleElapsed = as.schedule.totalDuration;

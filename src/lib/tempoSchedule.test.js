@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSchedule, systemIndexAtElapsed, progressWithinSystem, nearestSystemIndex } from './tempoSchedule.js';
+import { buildSchedule, systemIndexAtElapsed, progressWithinSystem, nearestSystemIndex, beatTimestamps, nearestBeatTime } from './tempoSchedule.js';
 
 // measures [2,3,1], 4/4 @ 120bpm (0.5s/beat) -> durations 4s, 6s, 2s -> starts 0,4,10 -> total 12
 function sampleSchedule() {
@@ -74,5 +74,43 @@ describe('nearestSystemIndex', () => {
   });
   it('returns 0 for an empty list', () => {
     expect(nearestSystemIndex([], 250)).toBe(0);
+  });
+});
+
+describe('beatTimestamps', () => {
+  it('produces one timestamp per beat, evenly spaced within each system', () => {
+    const s = sampleSchedule(); // measures [2,3,1], 4/4 @ 120bpm -> 0.5s/beat throughout
+    const beats = beatTimestamps(s, 4);
+    expect(beats.length).toBe(2 * 4 + 3 * 4 + 1 * 4); // 24
+    expect(beats[0]).toBe(0);
+    expect(beats[1]).toBeCloseTo(0.5, 8);
+    // first beat of system 1 (index 8) should land exactly on system 1's start (4)
+    expect(beats[8]).toBeCloseTo(4, 8);
+    // first beat of system 2 (index 20) should land exactly on system 2's start (10)
+    expect(beats[20]).toBeCloseTo(10, 8);
+  });
+
+  it('skips systems with zero beats instead of producing garbage entries', () => {
+    const s = buildSchedule({ measuresPerSystem: [0, 2], beatsPerMeasure: 4, bpm: 120 });
+    const beats = beatTimestamps(s, 4);
+    expect(beats.length).toBe(8);
+  });
+
+  it('returns an empty list for an empty schedule', () => {
+    const s = buildSchedule({ measuresPerSystem: [], beatsPerMeasure: 4, bpm: 120 });
+    expect(beatTimestamps(s, 4)).toEqual([]);
+  });
+});
+
+describe('nearestBeatTime', () => {
+  const beats = [0, 0.5, 1, 1.5, 2];
+  it('finds the closest beat timestamp', () => {
+    expect(nearestBeatTime(beats, 0.74)).toBe(0.5);
+    expect(nearestBeatTime(beats, 0.76)).toBe(1);
+    expect(nearestBeatTime(beats, -1)).toBe(0);
+    expect(nearestBeatTime(beats, 10)).toBe(2);
+  });
+  it('returns null for an empty list', () => {
+    expect(nearestBeatTime([], 1)).toBeNull();
   });
 });
