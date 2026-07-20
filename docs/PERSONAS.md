@@ -49,10 +49,17 @@ blendshapes), rigid-body head-pose estimation, wink/blink detection.
   back to the full frame to re-lock if tracking is lost. Manual zoom prefers the webcam's own
   hardware zoom (real optical detail) when the device exposes one, falling back to digital zoom.
 
+- `calibModelId()` existed as two identical, independent definitions — `appState.js` and
+  `calibration.js` — with only the latter actually imported anywhere. **Fixed** (2026-07-20, see
+  `docs/reviews/`) by deleting the unused copy. Real drift risk for near-zero effort: a future
+  model-version bump edited in only one copy would have invalidated saved calibrations
+  inconsistently depending on which copy a given call site happened to import.
+
 **Open questions / future research:**
-- Whether iris landmarks alone (without full FaceLandmarker) could reduce model size/load time —
-  not investigated; MediaPipe's face-landmark + WASM bundle is a large first-load fetch from
-  Google's CDN (see Privacy/Architecture persona for why it isn't self-hosted).
+- Whether iris landmarks alone (without full FaceLandmarker) could reduce the ~13MB first-load
+  fetch further — not investigated. The fetch is now same-origin (see Privacy/Architecture
+  persona), so this would only help load time, not the CDN-blocking failure mode that motivated
+  self-hosting in the first place.
 - Robustness under glasses glare / low light beyond what "Check accuracy" already surfaces.
 
 ---
@@ -315,8 +322,16 @@ surface as more than a declined "no suggestion"):**
   once a direction is chosen.
 - Repeat signs / codas / D.S. al Fine and their effect on auto-scroll's linear schedule — out of
   v1 scope, unaddressed.
-- Whether note-head density (rather than just barline count) could refine the "assume uniform
-  note values" approximation without tipping into full OMR.
+- ~~Whether note-head density could refine the "assume uniform note values" approximation~~ —
+  **closed as moot (2026-07-20, independent review + persona triage, see `docs/reviews/`):**
+  `buildSchedule()` never actually depends on note values — `duration = measures × beatsPerMeasure
+  × secPerBeat` is exact regardless of whether a measure holds a whole note or sixteen 16ths, so
+  there's no "uniform note values" approximation for note-head density to refine. If note-head
+  detection is ever built, its real value is as a **barline false-positive discriminator** for the
+  residual overcounting the `minFrac` 0.95 fix didn't fully eliminate in the densest passages (a
+  candidate column flanked by dense note-heads is more likely a stem than a barline) — see
+  persona 3's barline-detection write-up above. Point any future note-head-density work there, not
+  at schedule refinement.
 - Bundling or rendering real music-engraving-font reference glyphs (vs. a generic system font) for
   time-signature digit matching — the specific next step that would make that detector reliable
   enough to activate, if picked back up.
@@ -365,6 +380,35 @@ timing correction.
   logic (`tempoCorrection.js` still just reads whatever `bpm` is currently live), but worth
   knowing that switching the active section mid-session changes the schedule this correction is
   trimming against.
+
+- **A "reject implausible timing" gate can be dead code even when its own unit test passes, if the
+  real caller can never actually produce the input the gate is checking for.** An independent
+  review (2026-07-19, see `docs/reviews/`) found that `IMPLAUSIBLE_BEAT_FRACTION` (originally 0.5)
+  could never reject anything in the real pipeline: `tempoSchedule.js`'s `nearestBeatTime()` always
+  matches an onset to the *closest* point on a uniform beat grid, so the error it can ever produce
+  is mathematically bounded to at most half a beat — `|beatFrac| ≤ 0.5` was therefore always true,
+  not a meaningful check. `applyOnset()`'s own hand-crafted unit test passed because it fed a
+  synthetic `expectedBeatTime` the real nearest-neighbor lookup would never actually produce.
+  **Fixed** by lowering the threshold to 0.35 — comfortably below the 0.5 ceiling nearest-neighbor
+  matching can ever reach, so it now genuinely rejects the ambiguous band near the midpoint between
+  two beats (where "closest" is nearly a coin flip) instead of accepting every match by
+  construction. Added a regression test that goes through the real `buildSchedule` →
+  `beatTimestamps` → `nearestBeatTime` pipeline (not just `applyOnset` in isolation) to prove the
+  gate now filters something end-to-end — the kind of test that would have caught this the first
+  time. **General lesson: when a threshold check's input comes from an upstream computation with
+  its own mathematical bounds (like nearest-neighbor lookup), verify the check's threshold is
+  actually inside those bounds — testing the checking function in isolation with hand-crafted
+  inputs can pass while the check is unreachable through the real pipeline.**
+
+- **`getUserMedia({ audio: true })` defaults to enabling echo cancellation, noise suppression, and
+  auto-gain control in most browsers — all three work against a rising-energy onset detector, not
+  for it.** Noise suppression is trained to remove non-speech transients, which is exactly what an
+  instrument attack is; auto-gain compresses the very jump the detector is watching for. **Fixed**
+  (2026-07-20, see `docs/reviews/`) by requesting `{ echoCancellation: false, noiseSuppression:
+  false, autoGainControl: false }` explicitly in `liveTempo.js`'s `getUserMedia` call — the
+  detector already does its own adaptive noise-floor tracking (`onsetProcessor.js`'s leaky-average
+  `avgEnergy`), so raw, unprocessed mic input is what it actually wants; browser-side conditioning
+  was redundant at best, actively fighting the detector at worst.
 
 **Open questions / future research:**
 - Pitch/onset confusion in polyphonic instruments (piano, guitar chords) — current detector is
@@ -430,6 +474,49 @@ hold-debounce, leaky-integrator drift correction, eased snapping.
   this class of conflict explicitly** — "reads different inputs" does not imply "can't collide,"
   and this bug shipped once already (in the time-based auto-scroll feature) before being caught.
 
+- **A second module re-deriving capped dead-zone geometry from raw config (instead of importing
+  the capped result) can silently reintroduce the exact bug the cap fixed, in a place tests
+  didn't cover.** An independent review (2026-07-19, see `docs/reviews/`) found `winkTracking.js`
+  synthesizing its trigger point from raw `cfg.bandPos`/`cfg.deadZoneFrac`, not `decide()`'s
+  capped `deadUp`/`deadDown` — at reachable slider settings (e.g. band 20% + dead zone 20%, both
+  well inside the sliders' ranges) the real "up" trigger zone caps down to an ~8px sliver, but the
+  wink code's uncapped math (plus a fixed absolute floor clamp) could synthesize a point that
+  landed *outside* that sliver — left wink silently did nothing, in the default tracking type. The
+  existing wink test only asserted against the uncapped threshold, so it didn't catch it. **Fixed**
+  by exporting the capping math as `deadZoneBounds(cfg, H)` from `followLogic.js` (decide() now
+  calls it too, removing the duplication) and having `winkTracking.js` place its synthesized point
+  at a *fraction of the real (possibly tiny) reachable sliver's own width* — `depth = 0.15 + 0.8 ×
+  winkStrength`, scaled to whatever `deadZoneBounds` says the sliver actually is — instead of a
+  fixed absolute reach past an assumed edge. **General lesson: when a value's valid range is
+  computed with a cap/clamp in one place, any other producer of that same kind of value must
+  import the capped computation itself, not re-derive an uncapped version from the same raw
+  inputs** — this is the same "geometry beats a second re-derivation" class of bug as the original
+  dead-zone cap fix above, just one hop further from where the cap was first added.
+
+- **A DOM re-render doesn't invalidate geometry another feature already captured from it, unless
+  something explicit makes that connection.** The same 2026-07-19 review found `pdf.js`'s
+  `renderAll()` was both re-entrant (a resize/zoom/panel-collapse mid-drag could fire it multiple
+  times before the first call finished, interleaving two page sets — `main.js`'s resize listener
+  called it on every event, undebounced) and silently invalidating: `scoreAnalysis.js`'s
+  `analyzeScore()` bakes `state.autoScroll.systemBands` as *absolute document pixels* at Analyze
+  time, and nothing told auto-scroll a later re-render had moved everything — Start would then
+  scroll/highlight the wrong position with no warning, silently, mid-performance. **Fixed:**
+  `renderAll()` now carries a generation counter, checked after every `await`, so a superseded
+  call stops touching the DOM (clearing/appending/calling `detectSystems()`) as soon as a newer
+  call has started — snap mode's own detection already re-runs inside `renderAll()`, so this alone
+  fixes it. For auto-scroll, `renderAll()` now also invalidates `state.autoScroll.analyzed` (and
+  disables the Start button) whenever it completes a re-render while a previous analysis existed,
+  with a toast explaining why — the cheap, honest fix; a fraction-of-page-height storage rewrite
+  (resolving to document pixels at use time instead of baking absolute pixels in) remains as a
+  more thorough follow-up if the toast-and-reanalyze flow proves annoying in practice. Separately,
+  `main.js`'s resize handler now debounces the `renderAll()` call itself (folded into the existing
+  400ms recalibration-check timer) rather than firing on every intermediate resize event. **General
+  lesson: when a producer module captures derived data from the DOM/render output (pixel positions,
+  bounding boxes, anything geometry-shaped), and a *different* module can trigger a re-render, the
+  producer needs either to re-derive on demand or be explicitly told "that's stale now" — a shared
+  render entry point is the natural place to own that invalidation, same as it's the natural place
+  to own re-entrancy guards.**
+
 **Open questions / future research:**
 - Whether snap-mode's fixed `dt*6` easing rate should itself be user-tunable (currently baked in)
   — no reported user complaints yet, so untouched.
@@ -488,6 +575,17 @@ our real users actually read music" check.
   visibility condition should check the active tab directly, not a proxy state that happens to
   usually correlate with it** — the proxy will eventually be wrong in some reachable combination
   a user finds before you do.
+- **The default-visible tab was Tempo, not Eye/Wink — silently contradicting the README's own
+  quick-start, the default tracking type (wink), and the reading band's default-on state.** A
+  first-time student following the README's setup steps would open the app to the wrong panel,
+  with no visible path back to what the instructions just described — a first-five-seconds failure
+  for exactly the "student mid-warm-up won't debug a confusing panel" scenario above, found by an
+  independent review (2026-07-20, see `docs/reviews/`). Notably, `index.html`'s own static markup
+  already had `trackingPanel` visible and `autoScrollPanel` hidden by default — `tabsUI.js`'s
+  `initTabsUI()` was actively fighting the HTML's own default on every load. **Fixed** by defaulting
+  to `tabTracking`, which now agrees with the HTML. **General lesson: a "trivial effort" fix can
+  still be a first-impression-breaking bug** — effort size and user impact are independent axes;
+  don't let one substitute for triaging the other.
 
 **Open questions / future research:**
 - No current handling for **duet/ensemble parts with cues** (small cue notes from another
@@ -504,7 +602,9 @@ our real users actually read music" check.
 **Owns:** the "everything runs in the browser, nothing is ever uploaded" constraint, and vetting
 every new feature idea against it before it gets designed.
 **Files:** whole-app constraint — no `src/` file is exempt; most visible in `README.md`'s privacy
-section and the absence of any server/backend in the project.
+section and the absence of any server/backend in the project. `scripts/fetch-mediapipe-assets.mjs`
+and `public/mediapipe/` (git-ignored, populated at dev/build time) hold the self-hosted MediaPipe
+assets — see below.
 
 **What we've learned:**
 - This is a **hard constraint, not a preference** — it has already ruled out a concrete feature
@@ -512,15 +612,37 @@ section and the absence of any server/backend in the project.
   have made accurate auto-scroll tempo detection much easier). Any future feature proposal that
   implies "send the score/audio/video to a server" needs a client-side-only alternative or it
   doesn't ship, no matter how much easier the server-side version would be.
-  It's also why MediaPipe's face model and WASM runtime are fetched from Google's CDN rather than
-  self-hosted/bundled: those are large ML assets, and the tradeoff (needing internet on first
-  load only, browser-cached after) was judged acceptable since inference itself still happens
-  entirely on-device — no frame or audio data ever leaves the machine, only the (large,
-  non-personal) model weights come in.
 - Corollary for calibration/settings data: it's stored **only in the browser** (no account, no
   sync) — that's a feature ("close the tab and nothing is kept except your saved settings"), so
   any new persisted setting should default to local storage, not assume a backend will ever
   exist.
+- **The "MediaPipe's model/WASM are too large to self-host" tradeoff was never actually measured,
+  and turned out to be wrong.** An independent review (2026-07-19) challenged it; verification
+  (2026-07-20, live `HEAD`/download checks against the exact pinned URLs) found the real combined
+  size is **~13MB** (float16 `face_landmarker.task` = 3.76MB, the larger of the two WASM variants
+  ≈ 9MB — only one loads per session) — comfortably small, not "large" by this project's own PDF-
+  loading standards. The CDN-loading approach's actual cost fell on exactly this app's audience:
+  school networks commonly filter `storage.googleapis.com`/`cdn.jsdelivr.net`, which meant a
+  blocked first load killed the app outright with a confusing error for a user with no way to
+  self-diagnose "my school blocks Google's CDN" — worse than the inconvenience the CDN approach
+  was chosen to avoid. **Fixed** (2026-07-20, see `docs/reviews/`): `scripts/fetch-mediapipe-
+  assets.mjs` runs automatically before `dev`/`build` (via npm's `pre*` script lifecycle) and
+  copies the WASM files straight out of the already-installed `@mediapipe/tasks-vision` npm
+  package (so they can never drift from the pinned dependency version) plus downloads the model
+  once from its stable, version-pinned URL; `camera.js` now points at same-origin
+  `/mediapipe/wasm` and `/mediapipe/models/face_landmarker.task` instead. `public/mediapipe/` is
+  git-ignored — a ~13MB binary doesn't belong in git history when it can be regenerated
+  deterministically from a pinned dependency + a stable URL, the same reasoning that keeps user
+  PDFs out of the repo. Licensing checked out too (`@mediapipe/tasks-vision` is Apache-2.0; native
+  MediaPipe apps already bundle the `.task` file by design). The model URL was already pinned to
+  version `1`, not `latest`, so self-hosting introduces **no new staleness risk** versus what was
+  already shipping — a version bump requires a code change either way, CDN or not. **The
+  constraint itself never actually required a CDN** — it was always "no frame/audio data leaves
+  the machine," and inference still runs 100% on-device either way; this was a scope refinement of
+  *how* the model gets to the browser, not a reversal of the constraint. **General lesson: a
+  documented tradeoff's numbers should be treated as a claim to verify, not a fact to cite
+  indefinitely** — this one sat unverified long enough for the actual asset sizes to never once
+  have been checked against the real, small numbers.
 
 **When to invoke:** early — at the *idea* stage of any feature that touches camera frames,
 microphone audio, or the loaded PDF, before design work goes further. Cheaper to redirect a
@@ -538,17 +660,23 @@ feature idea here than to redesign it after building a server-dependent prototyp
 
 **Owns:** making sure detection-accuracy and interaction-logic changes are actually verified,
 not just plausible-looking.
-**Files:** every `*.test.js` colocated under `src/lib/`; the Playwright-smoke-test pattern for
-DOM-facing changes (see the `run` skill).
+**Files:** every `*.test.js` colocated under `src/lib/`.
 
 **What we've learned:**
 - **Pure logic always gets colocated Vitest tests with synthetic fixtures** (`src/lib/*.js` +
   `*.test.js` next to it) — this is non-negotiable for anything in `src/lib/`, which exists
   specifically to hold dependency-free, testable logic separate from DOM-facing wiring.
-- **DOM-facing / hardware-dependent changes get a Playwright smoke test** (headless Chromium,
-  screenshot + console-error check) via the `run` skill pattern, since camera/wink features
-  can't be meaningfully verified by unit tests alone and can't be manually driven by an agent
-  without real hardware.
+- **DOM-facing / hardware-dependent changes get an ad hoc, session-driven Playwright-automated
+  smoke check** (headless Chromium, screenshot + console-error check, real file inputs where
+  relevant) via the `run` skill, when camera/wink features can't be meaningfully verified by unit
+  tests alone and can't be manually driven by an agent without real hardware. **This is not a
+  committed, repeatable test suite** — there is no `e2e/` directory, no Playwright dependency in
+  `package.json`, and no e2e job in CI (confirmed 2026-07-19, see `docs/reviews/`, finding C5).
+  It's a one-off verification technique available *during a working session*, not automated
+  regression coverage; don't describe it as the latter in code comments or elsewhere in this file
+  — a stale claim to the contrary in `liveTempo.js` sat undetected until an independent review
+  caught it. If durable e2e coverage is ever wanted, it needs to be built and committed as real
+  infrastructure (a Playwright dependency + CI job), not assumed to already exist.
 - **The most important lesson so far:** for algorithmic/detection work (staff detection, barline
   detection), a **synthetic-but-realistic fixture** (e.g. an actually-generated PDF with known,
   deliberately-placed barline positions, rendered through the real PDF.js pipeline) caught a real
@@ -628,6 +756,109 @@ established.
   accuracy — ships safely inert** (region-finding is correct and kept; digit classification
   against generic font glyphs isn't). Would need real music-engraving-font reference glyphs to
   reconsider, not a different algorithm. (Persona 3)
+
+**Cross-cutting triage of the 2026-07-19 Fable review** (see
+[`docs/reviews/2026-07-19-fable-review.md`](reviews/2026-07-19-fable-review.md); A1/C1 already
+fixed and merged before this triage). Full per-finding detail lives in that file and in each
+owning persona's section — this is the prioritized punch list, not a restatement.
+
+**Progress (2026-07-20): all of "do soon" shipped** — D3+D2, C2, E1, F3, A5(c), C5, B1, and F1
+(bumped up from "do soon"/verify-first once the Privacy persona's own byte-size check below came
+back favorable). Each has its own durable-finding bullet in its owning persona's section above;
+this list is kept below as the historical record of what was triaged and why, not as an open TODO
+— check each persona's section for current status rather than assuming anything below is still
+outstanding.
+
+*Do soon (small, high-leverage, or fixes a documented-but-false safety property):*
+- **D3** — auto-scroll's `systemBands` go stale after any resize/zoom with no invalidation; silent
+  wrong-position playback is the feature's worst failure mode. Cheap fix (set `analyzed = false` +
+  "layout changed, re-analyze" toast) ships now; fraction-based storage can follow later. Bundle
+  with **D2** (undebounced re-entrant `renderAll()`) — same code path, same audit.
+- **C2** — disable `echoCancellation`/`noiseSuppression`/`autoGainControl` on the mic stream.
+  Trivial, likely the single highest-value onset-quality fix available, do before considering C4.
+- **E1** — default tab is Tempo while onboarding/README/default tracking type all lead with
+  Eye/Wink; one-line default-tab fix.
+- **F3** — wrap `loadPdf`'s rejection (corrupt/password PDFs) in the existing toast path; trivial.
+- **A5(c)** — delete the duplicate `calibModelId()` definition (only one is imported); a real
+  future drift risk for near-zero effort, not just a style nit.
+- **C5** — fix `liveTempo.js`'s header comment claiming a Playwright e2e test that doesn't exist
+  (no `e2e/` dir, no Playwright dep). Say what's actually verified today.
+- **B1** — close persona 3/4's "note-head density could refine uniform-note-value assumption" open
+  question as moot: `buildSchedule()` never depends on note values, only measure count × beats.
+  Redirect any future note-head-detection effort toward barline false-positive discrimination
+  instead, if it's ever built.
+- **F1-verify** — before spiking self-hosting, just check the numbers: confirmed today that
+  `camera.js` pulls WASM from `cdn.jsdelivr.net` and the model from
+  `storage.googleapis.com/mediapipe-models`. Reviewer's 10-15MB estimate should be checked against
+  actual bytes; if confirmed small, self-hosting under `public/models/` is genuinely Low effort
+  and directly strengthens the privacy story. See "verdict revisit" below — this is the one finding
+  from the review that argues with an existing persona verdict's *reasoning*, not just its scope.
+
+*Do eventually (real value, but sized for a dedicated session or dependent on something above):*
+- **F4** — small MuseScore-generated fixture corpus (4-6 PDFs) through the real render→detect
+  pipeline in CI. High leverage for detection-work velocity, but scope it honestly: as designed
+  it catches OMR/staff/measure regressions (the class that already bit `collapseThickness`, the
+  pad=20 fix, minFrac), not D3/A1-class interaction bugs. If built, add one Playwright scenario
+  that resizes/collapses the panel after Analyze and asserts the schedule invalidates or
+  re-resolves correctly — that's the part that actually generalizes D3's lesson into a regression
+  net; the static fixtures alone would not have caught D3.
+- **F2** — declarative settings registry. Not urgent today, but it's explicitly the mechanism the
+  review says will produce the *next* E1/reading-band-class bug as more modes accumulate. Do this
+  before adding another top-level mode/tab, not before.
+- **B2** — bundle Bravura's SMuFL time-signature glyphs to unblock digit classification. This
+  isn't a new idea, it's persona 3's own documented reconsideration condition ("would need real
+  engraving-font reference glyphs") being satisfied — low-medium effort, activates a feature that
+  already ships inert with working plumbing.
+- **A2** — give `decide()` an explicit intent channel instead of wink synthesizing a fake gaze
+  point. A1 is already patched, so this is prevention of a bug *class* recurring, not an active
+  fix — worth doing before the next `decide()` geometry change, not urgently now.
+- **A3** — free LOO-residual validation at `finishCalibration()` time; low effort, proactive
+  recalibration prompts.
+- **A4** — switch `irisTracking.js`'s blink gate to the blendshape signal persona 1 already
+  concluded is better; low effort, closes a documented contradiction.
+- **B4** — extract shared `detectStaffRows` to stop `analyzeScore()` and `systemDetection.js`
+  duplicating tuned thresholds (the exact kind of constant the minFrac episode showed does drift).
+- **B5** — per-system beats-per-line override for the confirmed real mixed-meter case (Alto
+  Clarinet 5/8→7/8→3/4). Real feature work, not a bug fix; needs its own UI design pass.
+- **D1** — One Euro filter for gaze smoothing. Solid argument, low-med effort, but no reported
+  user complaint about the current EMA — do when touching `followLogic.js` next, not as a
+  standalone session.
+- **E2** — PageUp/PageDown pedal keycodes; low effort, real value for hardware this audience
+  actually uses, just not urgent.
+- **E3** — one baseline ARIA pass (toast `aria-live`, tab roles, label associations); cheap, no
+  reason to keep deferring indefinitely, but not blocking anything.
+- **B3** — sharpen the full-OMR revisit trigger from "a lightweight ML model turns up" to the
+  specific, checkable condition: ONNX-exported OMR models (the `oemer`-class reference point)
+  becoming small/fast enough under `onnxruntime-web`/WebGPU. Documentation-only change to the
+  verdict text below.
+
+*Skip / decline for now:*
+- **D4** (viewport-lazy page rendering) — real risk for the sections feature's large-PDF case, but
+  Med-High effort and the review's own suggestion is right: measure actual memory on a real
+  30-page score-plus-parts PDF before committing to an `IntersectionObserver` rewrite. Don't build
+  this speculatively.
+- **C3** (cache `beatTimestamps` per schedule) — real but minor (GC churn only, not correctness);
+  low value relative to even its own low effort given everything else queued.
+- **C4** (spectral flux onset detection) — explicitly sequenced behind C2 in the review itself;
+  don't touch the 54-line worklet until C2 is shipped and shown insufficient.
+- **A5(a)/(b)** (throttle wink-panel DOM writes, avoid per-frame object allocation) — real but
+  low-impact perf hygiene; fold into a future pass through that file rather than a dedicated task.
+- **D5** (idle-loop DOM writes in `autoScrollController.tick()`) — same category as A5(a)/(b), fold
+  in opportunistically.
+
+**Does this review suggest a documented verdict needs real revisiting?** One case, not more: **F1
+(self-host MediaPipe) challenges the Privacy/Architecture persona's stated reasoning**, not just
+its scope. The existing verdict's reasoning was "these are large ML assets, so CDN is an
+acceptable tradeoff" — the review's claim (and the confirmed CDN URLs above) makes that an
+empirical question the persona never actually measured. **Falsifiable question before any
+self-hosting work:** what is the actual combined byte size of `face_landmarker.task` (float16) +
+the `@mediapipe/tasks-vision` WASM bundle, and does serving them same-origin from GitHub Pages
+(a) stay comfortably within GitHub's repo/Pages size norms and (b) actually eliminate the failure
+mode described (school-network filtering of `storage.googleapis.com`/jsDelivr specifically,
+distinct from GitHub Pages being blocked too, which would need a different mitigation entirely)?
+If both check out, this is a scope refinement of the existing verdict (the constraint was always
+"no frame/audio data leaves the machine," not "must use a CDN") rather than a reversal — but it
+should be measured, not assumed, before the Low-effort estimate is trusted.
 
 **Open questions worth spiking next** (candidate backlog, not commitments):
 - In-browser lightweight ML for rhythm extraction (would revisit the OMR verdict — see Privacy

@@ -16,10 +16,13 @@ for tempo detection (see the OMR Specialist persona).
 
 Rule of thumb: any proposal that implies "send X to a server" needs a client-side-only
 alternative (WASM/on-device model/local computation) or it doesn't ship, regardless of how much
-easier the server-side version would be. Large ML assets (like MediaPipe's model + WASM runtime)
-may still be *fetched* from a CDN on first load — that's acceptable, since inference itself stays
-on-device and no user data is what's transmitted; don't confuse "fetches a model" with "uploads
-data." Persisted settings default to browser local storage, never assume a backend will exist.
+easier the server-side version would be. ML assets fetched at build/dev time and served
+same-origin (like MediaPipe's model + WASM runtime, self-hosted under `public/mediapipe/` via
+`scripts/fetch-mediapipe-assets.mjs`) are the default now, not CDN-fetched at runtime — don't
+assume "large ML asset" automatically means "must be a third-party CDN fetch" without actually
+checking the size; that assumption sat unverified and wrong for this exact asset until a
+2026-07-20 review checked it (~13MB, well within self-hosting range). Persisted settings default
+to browser local storage, never assume a backend will exist.
 
 Invoke this persona **early**, before a feature idea gets real design investment — it's much
 cheaper to redirect an idea here than to redesign a built prototype. Write any new verdict back
