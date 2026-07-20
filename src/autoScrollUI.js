@@ -68,6 +68,18 @@ export function initAutoScrollUI() {
     setStatus('', 'auto-scroll paused');
   };
 
+  $('sectionsSelect').addEventListener('change', () => {
+    selectSection(parseInt($('sectionsSelect').value, 10));
+  });
+  $('sectionNameInput').addEventListener('change', () => {
+    const as = state.autoScroll;
+    const sec = as.sections[as.activeSectionIndex];
+    if (!sec) return;
+    sec.name = $('sectionNameInput').value.trim() || `Section ${as.activeSectionIndex + 1}`;
+    $('sectionNameInput').value = sec.name;
+    renderSectionsList(); // refresh the dropdown's option label to match the rename
+  });
+
   $('liveTempoToggle').onclick = async () => {
     const as = state.autoScroll;
     if (!as.liveTempoEnabled) {
@@ -153,51 +165,45 @@ function selectSection(idx) {
 
 function renderSectionsList() {
   const as = state.autoScroll;
-  const list = $('sectionsList');
-  list.innerHTML = '';
+  const select = $('sectionsSelect');
+  select.innerHTML = '';
   as.sections.forEach((sec, i) => {
-    const row = document.createElement('div');
-    row.className = 'sectionRow' + (i === as.activeSectionIndex ? ' active' : '');
-
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.value = sec.name;
-    nameInput.addEventListener('change', () => {
-      sec.name = nameInput.value.trim() || `Section ${i + 1}`;
-    });
-
-    const meta = document.createElement('span');
-    meta.className = 'sub';
-    meta.textContent = `${sec.systemBands.length} systems` + (sec.tempoMarking ? ` · detected: ${sec.tempoMarking}` : '');
-
-    const btn = document.createElement('button');
-    btn.textContent = i === as.activeSectionIndex ? '✓ Active' : 'Use this section';
-    btn.onclick = () => selectSection(i);
-
-    row.append(nameInput, meta, btn);
-
-    // Best-effort time-signature suggestion (see timeSigDetection.js) --
-    // offered, never applied: shape-matched digits, not read text like the
-    // name/tempo above, so it needs the user's confirmation before it
-    // touches anything.
-    if (sec.detectedTimeSig) {
-      const ts = sec.detectedTimeSig;
-      const tsBtn = document.createElement('button');
-      tsBtn.textContent = `🔍 Time signature: ${ts.beatsPerMeasure}/${ts.noteValue} detected — use this?`;
-      tsBtn.onclick = () => {
-        sec.beatsPerMeasure = ts.beatsPerMeasure;
-        if (i === as.activeSectionIndex) {
-          as.beatsPerMeasure = ts.beatsPerMeasure;
-          $('beatsPerMeasure').value = ts.beatsPerMeasure;
-          $('beatsPerMeasureV').textContent = String(ts.beatsPerMeasure);
-        }
-        tsBtn.remove();
-      };
-      row.appendChild(tsBtn);
-    }
-
-    list.appendChild(row);
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = `${sec.name} (${sec.systemBands.length} systems)`;
+    select.appendChild(opt);
   });
+  select.value = String(as.activeSectionIndex);
+
+  const activeSec = as.sections[as.activeSectionIndex];
+  $('sectionNameInput').value = activeSec ? activeSec.name : '';
+  $('sectionMeta').textContent = activeSec && activeSec.tempoMarking ? `detected: ${activeSec.tempoMarking}` : '';
+
+  renderTimeSigSuggestion(activeSec);
+}
+
+// Best-effort time-signature suggestion (see timeSigDetection.js) --
+// offered, never applied: shape-matched digits, not read text like the
+// name/tempo above, so it needs the user's explicit confirmation before it
+// touches anything.
+function renderTimeSigSuggestion(sec) {
+  const container = $('sectionTimeSigSuggestion');
+  container.innerHTML = '';
+  if (!sec || !sec.detectedTimeSig) return;
+  const ts = sec.detectedTimeSig;
+  const btn = document.createElement('button');
+  btn.textContent = `🔍 Time signature: ${ts.beatsPerMeasure}/${ts.noteValue} detected — use this?`;
+  btn.onclick = () => {
+    sec.beatsPerMeasure = ts.beatsPerMeasure;
+    const as = state.autoScroll;
+    if (sec === as.sections[as.activeSectionIndex]) {
+      as.beatsPerMeasure = ts.beatsPerMeasure;
+      $('beatsPerMeasure').value = ts.beatsPerMeasure;
+      $('beatsPerMeasureV').textContent = String(ts.beatsPerMeasure);
+    }
+    container.innerHTML = '';
+  };
+  container.appendChild(btn);
 }
 
 function renderMeasuresList() {

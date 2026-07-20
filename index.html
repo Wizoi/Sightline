@@ -118,7 +118,10 @@
 
     <div id="sectionsBox" class="hidden">
       <label>Sections detected in this PDF — pick one to focus on</label>
-      <div id="sectionsList"></div>
+      <select id="sectionsSelect"></select>
+      <label>Section name <span class="val" id="sectionMeta"></span></label>
+      <input type="text" id="sectionNameInput" />
+      <div id="sectionTimeSigSuggestion"></div>
     </div>
 
     <label>Time signature — beats per measure <span class="val" id="beatsPerMeasureV"></span></label>
