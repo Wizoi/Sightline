@@ -20,8 +20,12 @@ export function toast(msg) {
   toast._t = setTimeout(() => t.classList.remove('show'), 1400);
 }
 
+// The reading band + "line-end" marker are eye/wink-tracking concepts —
+// hidden while auto-scroll is playing, since the system highlight
+// (autoScrollController.js) already marks the current line then and the
+// band would just be visual clutter for a mode it doesn't apply to.
 export function applyBand() {
-  bandEl.style.display = state.showBand ? 'block' : 'none';
+  bandEl.style.display = (state.showBand && !state.autoScroll.playing) ? 'block' : 'none';
   bandEl.style.top = (cfg.bandPos * 100) + 'vh';
   bandEl.style.height = (cfg.deadZoneFrac * 2 * 100) + 'vh';
   $('rightMark').style.left = (cfg.rightZoneFrac * 100) + 'vw';

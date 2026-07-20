@@ -1,5 +1,5 @@
 import { cfg, state } from './appState.js';
-import { $, toast, setStatus } from './ui.js';
+import { $, toast, setStatus, applyBand } from './ui.js';
 import { buildSchedule, progressWithinSystem, nearestSystemIndex } from './lib/tempoSchedule.js';
 import { decayIfQuiet, correctionStatus } from './lib/tempoCorrection.js';
 
@@ -33,11 +33,13 @@ export function startAutoScroll() {
   const startIdx = nearestSystemIndex(centers, viewportCenterDoc);
   as.scheduleElapsed = as.schedule.systems[startIdx] ? as.schedule.systems[startIdx].start : 0;
   as.playing = true;
+  applyBand();
   return true;
 }
 
 export function pauseAutoScroll() {
   state.autoScroll.playing = false;
+  applyBand();
 }
 
 export function stopAutoScroll() {
@@ -45,6 +47,7 @@ export function stopAutoScroll() {
   state.autoScroll.schedule = null;
   state.autoScroll.scheduleElapsed = 0;
   hideHighlight();
+  applyBand();
 }
 
 function hideHighlight() {

@@ -70,6 +70,16 @@ export const state = {
     measuresPerSystem: [],       // editable estimate, one entry per system
     beatsPerMeasure: 4,
     bpm: 100,
+
+    // Parts/movements detected within a single PDF (e.g. a full score
+    // followed by individual instrument parts) — see lib/scoreSections.js.
+    // Each entry is a saved snapshot of the four fields above it; selecting
+    // one (src/autoScrollUI.js) swaps its snapshot into them, so nothing
+    // else (schedule building, the tempo HUD, settings persistence) needs
+    // to know sections exist. Length <= 1 means nothing was detected — the
+    // UI hides the picker entirely in that case, matching today's behavior.
+    sections: [],
+    activeSectionIndex: 0,       // which entry in `sections` is live, for UI highlighting only
     tempoPct: 1,                 // live playback-speed multiplier (0.5-1.5), independent of bpm
     schedule: null,              // built from the above via lib/tempoSchedule.js when playback starts
     playing: false,

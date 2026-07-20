@@ -7,14 +7,22 @@ import { setFollowing } from './followController.js';
 
 export function initAutoScrollUI() {
   $('beatsPerMeasure').addEventListener('input', () => {
-    state.autoScroll.beatsPerMeasure = parseInt($('beatsPerMeasure').value, 10);
+    const v = parseInt($('beatsPerMeasure').value, 10);
+    state.autoScroll.beatsPerMeasure = v;
     $('beatsPerMeasureV').textContent = $('beatsPerMeasure').value;
+    // Keep the active section's own remembered value in sync, so switching
+    // sections and back restores what was set for each one.
+    const sec = state.autoScroll.sections[state.autoScroll.activeSectionIndex];
+    if (sec) sec.beatsPerMeasure = v;
   });
   $('beatsPerMeasureV').textContent = $('beatsPerMeasure').value;
 
   $('bpmInput').addEventListener('input', () => {
-    state.autoScroll.bpm = parseInt($('bpmInput').value, 10);
+    const v = parseInt($('bpmInput').value, 10);
+    state.autoScroll.bpm = v;
     $('bpmV').textContent = $('bpmInput').value + ' bpm';
+    const sec = state.autoScroll.sections[state.autoScroll.activeSectionIndex];
+    if (sec) sec.bpm = v;
     refreshTempoLabel();
   });
   $('bpmV').textContent = $('bpmInput').value + ' bpm';
@@ -26,12 +34,18 @@ export function initAutoScrollUI() {
   });
   $('tempoPctV').textContent = $('tempoPct').value + '%';
 
-  $('analyzeScoreBtn').onclick = () => {
+  $('analyzeScoreBtn').onclick = async () => {
     if (!state.pdfDoc) { toast('Load a PDF first'); return; }
     stopAutoScroll();
     $('autoScrollStart').disabled = true;
     $('autoScrollPause').disabled = true;
-    const result = analyzeScore();
+    $('analyzeScoreBtn').disabled = true;
+    let result;
+    try {
+      result = await analyzeScore();
+    } finally {
+      $('analyzeScoreBtn').disabled = false;
+    }
     renderSummary(result);
     $('autoScrollStart').disabled = !state.autoScroll.analyzed;
     toast(result.systemCount ? `Analyzed ${result.systemCount} systems` : 'No systems found');
@@ -91,7 +105,99 @@ function renderSummary(result) {
     ? `Found ${result.systemCount} systems.`
     : 'No systems found.';
   $('autoScrollWarnings').innerHTML = result.warnings.map((w) => '<li>' + w + '</li>').join('');
+
+  // More than one section means this PDF is a full score plus individual
+  // parts (or similar) -- see lib/scoreSections.js. A single section is by
+  // far the common case (this app's core audience is single-staff band
+  // parts), so the picker stays hidden and nothing about the UI changes.
+  if (state.autoScroll.sections.length > 1) {
+    $('sectionsBox').classList.remove('hidden');
+    selectSection(0); // also renders the sections list + measures list
+  } else {
+    $('sectionsBox').classList.add('hidden');
+    renderMeasuresList();
+  }
+}
+
+// Swaps a section's own remembered systemBands/measuresPerSystem/tempo/
+// time-signature into the live top-level state.autoScroll fields -- see
+// appState.js's comment on `sections` for why this is a reference swap,
+// not a copy: autoScrollController.js only ever reads the top-level
+// fields, so nothing there needs to know sections exist.
+function selectSection(idx) {
+  const as = state.autoScroll;
+  const sec = as.sections[idx];
+  if (!sec) return;
+
+  as.activeSectionIndex = idx;
+  as.systemBands = sec.systemBands;
+  as.measuresPerSystem = sec.measuresPerSystem;
+  as.beatsPerMeasure = sec.beatsPerMeasure;
+  as.bpm = sec.bpm;
+
+  $('beatsPerMeasure').value = sec.beatsPerMeasure;
+  $('beatsPerMeasureV').textContent = String(sec.beatsPerMeasure);
+  $('bpmInput').value = sec.bpm;
+  $('bpmV').textContent = sec.bpm + ' bpm';
+  refreshTempoLabel();
+
+  stopAutoScroll(); // the active range just changed -- any in-progress schedule is stale
+  $('autoScrollStart').disabled = !as.measuresPerSystem.length;
+
+  renderSectionsList();
   renderMeasuresList();
+
+  const first = sec.systemBands[0];
+  if (first) window.scrollTo(0, Math.max(0, first.center - window.innerHeight / 2));
+}
+
+function renderSectionsList() {
+  const as = state.autoScroll;
+  const list = $('sectionsList');
+  list.innerHTML = '';
+  as.sections.forEach((sec, i) => {
+    const row = document.createElement('div');
+    row.className = 'sectionRow' + (i === as.activeSectionIndex ? ' active' : '');
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = sec.name;
+    nameInput.addEventListener('change', () => {
+      sec.name = nameInput.value.trim() || `Section ${i + 1}`;
+    });
+
+    const meta = document.createElement('span');
+    meta.className = 'sub';
+    meta.textContent = `${sec.systemBands.length} systems` + (sec.tempoMarking ? ` · detected: ${sec.tempoMarking}` : '');
+
+    const btn = document.createElement('button');
+    btn.textContent = i === as.activeSectionIndex ? '✓ Active' : 'Use this section';
+    btn.onclick = () => selectSection(i);
+
+    row.append(nameInput, meta, btn);
+
+    // Best-effort time-signature suggestion (see timeSigDetection.js) --
+    // offered, never applied: shape-matched digits, not read text like the
+    // name/tempo above, so it needs the user's confirmation before it
+    // touches anything.
+    if (sec.detectedTimeSig) {
+      const ts = sec.detectedTimeSig;
+      const tsBtn = document.createElement('button');
+      tsBtn.textContent = `🔍 Time signature: ${ts.beatsPerMeasure}/${ts.noteValue} detected — use this?`;
+      tsBtn.onclick = () => {
+        sec.beatsPerMeasure = ts.beatsPerMeasure;
+        if (i === as.activeSectionIndex) {
+          as.beatsPerMeasure = ts.beatsPerMeasure;
+          $('beatsPerMeasure').value = ts.beatsPerMeasure;
+          $('beatsPerMeasureV').textContent = String(ts.beatsPerMeasure);
+        }
+        tsBtn.remove();
+      };
+      row.appendChild(tsBtn);
+    }
+
+    list.appendChild(row);
+  });
 }
 
 function renderMeasuresList() {
