@@ -1,4 +1,4 @@
-import { $ } from './ui.js';
+import { $, applyBand } from './ui.js';
 
 // Switches which top-level tracking-mode panel is visible (Eye/Wink vs.
 // Tempo/auto-scroll). Purely a visibility toggle -- it does not start,
@@ -15,9 +15,14 @@ function selectTab(activeBtnId) {
     $(btn).classList.toggle('active', active);
     $(panel).classList.toggle('hidden', !active);
   });
+  // The reading band is an Eye/Wink-tracking concept -- applyBand() itself
+  // checks which tab is active, so just re-running it here keeps it in
+  // sync the instant the user switches tabs, not just on the next
+  // unrelated slider/setting change.
+  applyBand();
 }
 
 export function initTabsUI() {
   TABS.forEach(({ btn }) => { $(btn).onclick = () => selectTab(btn); });
-  selectTab('tabTracking');
+  selectTab('tabAutoScroll');
 }

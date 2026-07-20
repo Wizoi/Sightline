@@ -136,14 +136,27 @@ export function findSectionTitle(pageItems, pageRows, knownNames, { leftMarginX 
 // Correlates real printed measure numbers against already-detected systems
 // on this page (systemsOnPage: [{ index, yTop, yBottom }], same y-space as
 // pageItems). A system with multiple staves repeats its measure number
-// once per staff — they should agree, so the first match is used.
-export function extractMeasureNumbers(pageItems, systemsOnPage) {
+// once per staff — any of them works, so the closest is used.
+//
+// pad matters more than it looks: a measure number is engraved *above* the
+// staff, not within it -- found consistently ~10pt above a system's own
+// detected top edge on a real densely-packed page (9 systems on one page)
+// where the un-padded version matched *zero* of 8 real printed numbers on
+// the page, silently leaving every system on it stuck with the (sometimes
+// badly wrong -- see barlineDetection.js) pixel-only estimate. A page with
+// more generous system spacing can happen to still match without any pad,
+// which is exactly why this went unnoticed until a tightly-packed page
+// surfaced it. pad=20 keeps a real margin over that observed ~10pt while
+// staying well under typical system-to-system spacing, so it can't reach
+// into a neighboring system's own number.
+export function extractMeasureNumbers(pageItems, systemsOnPage, { pad = 20 } = {}) {
   const numberItems = pageItems.filter((it) => /^\d+$/.test(it.str.trim()));
   const results = [];
   for (const sys of systemsOnPage) {
-    const inRange = numberItems.find((it) => it.y <= sys.yTop && it.y >= sys.yBottom);
-    if (!inRange) continue;
-    results.push({ systemIndex: sys.index, measureNumber: parseInt(inRange.str.trim(), 10) });
+    const candidates = numberItems.filter((it) => it.y <= sys.yTop + pad && it.y >= sys.yBottom);
+    if (!candidates.length) continue;
+    const best = candidates.reduce((a, b) => (Math.abs(b.y - sys.yTop) < Math.abs(a.y - sys.yTop) ? b : a));
+    results.push({ systemIndex: sys.index, measureNumber: parseInt(best.str.trim(), 10) });
   }
   return results;
 }

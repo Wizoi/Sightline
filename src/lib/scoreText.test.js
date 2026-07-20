@@ -207,6 +207,35 @@ describe('extractMeasureNumbers', () => {
     const systems = [{ index: 0, yTop: 730, yBottom: 700 }];
     expect(extractMeasureNumbers(items, systems)).toEqual([]);
   });
+
+  it('matches a number engraved above the system\'s own top edge, within pad', () => {
+    // The real, consistently-observed engraving offset: ~10pt above yTop.
+    const items = [item('21', 37.5, 393.7)];
+    const systems = [{ index: 0, yTop: 383.5, yBottom: 361.7 }];
+    expect(extractMeasureNumbers(items, systems)).toEqual([{ systemIndex: 0, measureNumber: 21 }]);
+  });
+
+  it('regression: matches every system on a tightly-packed real page (9 systems, one page)', () => {
+    // Mirrors the real bug: with no pad, this page matched zero of 8 real
+    // printed numbers, because every one sits just above its target
+    // system's un-padded range on a page with fairly tight system spacing.
+    const printed = [
+      ['6', 607.1], ['11', 536.0], ['16', 464.7], ['21', 393.7],
+      ['26', 322.4], ['33', 251.3], ['38', 180.3], ['43', 109.7],
+    ];
+    const items = printed.map(([n, y]) => item(n, 37.5, y));
+    const systemTops = [597.3, 526.0, 454.7, 383.5, 312.2, 241.6, 170.3, 99.7];
+    const systems = systemTops.map((yTop, i) => ({ index: i + 1, yTop, yBottom: yTop - 22 }));
+    const result = extractMeasureNumbers(items, systems);
+    expect(result).toHaveLength(8);
+    expect(result.map((r) => r.measureNumber)).toEqual([6, 11, 16, 21, 26, 33, 38, 43]);
+  });
+
+  it('picks the closest candidate when a generous pad could match more than one', () => {
+    const items = [item('5', 0, 100), item('9', 0, 108)]; // both within pad of yTop=95
+    const systems = [{ index: 0, yTop: 95, yBottom: 80 }];
+    expect(extractMeasureNumbers(items, systems)).toEqual([{ systemIndex: 0, measureNumber: 5 }]);
+  });
 });
 
 describe('refineMeasureCounts', () => {

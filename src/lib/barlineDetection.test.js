@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { countBarlines, estimateMeasureCount } from './barlineDetection.js';
 
-const BAND = 100; // bandHeight; default minFrac 0.85 -> need >= 85
+const BAND = 100; // bandHeight; default minFrac 0.95 -> need >= 95
 
 function columns(len, peaks, peakHeight = 100, baseline = 5) {
   const a = new Array(len).fill(baseline);
@@ -31,7 +31,7 @@ describe('countBarlines', () => {
 
   it('ignores runs that fall short of the height threshold', () => {
     const cols = columns(50, []);
-    cols[20] = 80; // below the default 0.85 * 100 = 85 requirement
+    cols[20] = 80; // below the default 0.95 * 100 = 95 requirement
     expect(countBarlines(cols, BAND)).toBe(0);
   });
 
@@ -42,6 +42,18 @@ describe('countBarlines', () => {
 
     const wide = columns(50, [10, 14]);
     expect(countBarlines(wide, BAND, { mergeGap: 5 })).toBe(1);
+  });
+
+  it('does not mistake dense note-stem/accent ink for barlines (regression)', () => {
+    // Found on a real, densely-notated mixed-meter passage: note stems,
+    // accents, and staccato dots can reach 80-91% of the band height --
+    // tall, but a genuine barline reaches the *full* band, not just most
+    // of it. The default 0.95 threshold (raised from 0.85) is specifically
+    // there to keep these out while still catching real barlines.
+    const cols = new Array(50).fill(5);
+    [12, 18, 25, 33, 41].forEach((c) => { cols[c] = 88; }); // stems/accents, not barlines
+    [10, 30, 45].forEach((c) => { cols[c] = 100; }); // genuine full-height barlines
+    expect(countBarlines(cols, BAND)).toBe(3);
   });
 });
 

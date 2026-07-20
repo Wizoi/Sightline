@@ -17,7 +17,7 @@
 // system's row extent (rowMax - rowMin + 1): how tall a run must be to
 // count as a full-height barline stroke rather than a stray mark.
 export function countBarlines(columnRunLengths, bandHeight, opts = {}) {
-  const minFrac = opts.minFrac ?? 0.85;  // must span at least this much of the band
+  const minFrac = opts.minFrac ?? 0.95;  // must span at least this much of the band
   const mergeGap = opts.mergeGap ?? 2;   // merge candidate columns this close together (one stroke, anti-aliased/thick)
   const need = bandHeight * minFrac;
 
