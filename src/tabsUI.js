@@ -1,0 +1,23 @@
+import { $ } from './ui.js';
+
+// Switches which top-level tracking-mode panel is visible (Eye/Wink vs.
+// Tempo/auto-scroll). Purely a visibility toggle -- it does not start,
+// stop, or pause either mode; autoScrollUI.js/main.js already handle that
+// mutual exclusion at the point the user actually starts one or the other.
+const TABS = [
+  { btn: 'tabTracking', panel: 'trackingPanel' },
+  { btn: 'tabAutoScroll', panel: 'autoScrollPanel' },
+];
+
+function selectTab(activeBtnId) {
+  TABS.forEach(({ btn, panel }) => {
+    const active = btn === activeBtnId;
+    $(btn).classList.toggle('active', active);
+    $(panel).classList.toggle('hidden', !active);
+  });
+}
+
+export function initTabsUI() {
+  TABS.forEach(({ btn }) => { $(btn).onclick = () => selectTab(btn); });
+  selectTab('tabTracking');
+}

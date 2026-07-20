@@ -11,9 +11,11 @@ import { startFollowLoop, setFollowing } from './followController.js';
 import { initSettingsUI, loadSettings } from './settings.js';
 import { initAutoScrollUI, pauseAutoScrollUI } from './autoScrollUI.js';
 import { startAutoScrollLoop } from './autoScrollController.js';
+import { initTabsUI } from './tabsUI.js';
 
 initSettingsUI();
 initAutoScrollUI();
+initTabsUI();
 
 /* ---------------------------------------------------------------------- *
  *  Primary controls
