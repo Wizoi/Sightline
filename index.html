@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-D2PTd8kA.js"></script>
+  <script type="module" crossorigin src="./assets/index-ESWF-XMu.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-BbKotdvq.css">
 </head>
 <body>
@@ -130,6 +130,10 @@
     <label>Playback speed <span class="val" id="tempoPctV"></span></label>
     <input type="range" id="tempoPct" min="50" max="150" value="100" />
     <div class="ends"><span>slower</span><span>faster</span></div>
+
+    <button id="liveTempoToggle">🎤 Live tempo correction (experimental)</button>
+    <div class="sub">Listens while you play and gently nudges the schedule toward your actual timing. Only active during playback.</div>
+    <div id="liveTempoStatus" class="sub"></div>
   </details>
 
   <details>
