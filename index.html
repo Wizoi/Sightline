@@ -34,8 +34,10 @@
   <input type="range" id="zm" min="40" max="140" value="100" />
   <div class="ends"><span>smaller — see more</span><span>bigger</span></div>
 
-  <details id="configBox" open>
-    <summary>⚙ Setup — camera, calibrate, accuracy</summary>
+  <details id="trackingBox" open>
+    <summary>👁 Eye/wink tracking</summary>
+    <div class="sub">Hands-free page turning driven by your webcam — an alternative to Auto-scroll below, not used together with it.</div>
+
     <label>Tracking type</label>
     <select id="trackingType"></select>
     <button id="camBtn">🎥 Start camera</button>
@@ -48,43 +50,65 @@
       <div class="ends" id="winkDebug"><span>left eye: <span class="val" id="wkL">–</span></span><span>right eye: <span class="val" id="wkR">–</span></span></div>
       <button id="winkCalibrateBtn">🎯 Calibrate wink sensitivity</button>
     </div>
+
+    <div class="row">
+      <button id="runBtn" disabled>▶ Follow eyes</button>
+      <button id="showBand">Hide band</button>
+    </div>
+    <div class="row">
+      <button id="snapBtn">▦ Snap: off</button>
+      <button id="driftBtn">🎯 Drift: off</button>
+    </div>
+    <button id="recenterBtn">⌖ Recenter to band center (R)</button>
+
+    <div class="group">The reading band</div>
+
+    <label>Reading zone size <span class="val" id="dzv"></span></label>
+    <input type="range" id="dz" min="4" max="40" value="18" />
+    <div class="ends"><span>small</span><span>large</span></div>
+
+    <label>Where you read on screen <span class="val" id="bpv"></span></label>
+    <input type="range" id="bp" min="12" max="55" value="50" />
+    <div class="ends"><span>near top</span><span>middle</span></div>
+
+    <div id="rightZoneRow">
+      <label>Turn the page when my eyes reach… <span class="val" id="rtv"></span></label>
+      <input type="range" id="rt" min="40" max="88" value="62" />
+      <div class="ends"><span>mid-line</span><span>line end</span></div>
+    </div>
+
+    <div class="group">How it scrolls</div>
+
+    <label>Page scroll speed <span class="val" id="spv"></span></label>
+    <input type="range" id="sp" min="60" max="1000" value="360" />
+    <div class="ends"><span>slow</span><span>fast</span></div>
+
+    <label>Wait before turning <span class="val" id="hdv"></span></label>
+    <input type="range" id="hd" min="0" max="1200" value="350" />
+    <div class="ends"><span>instant</span><span>patient (ignores quick glances)</span></div>
+
+    <details>
+      <summary>Advanced</summary>
+      <div id="smoothnessRow">
+        <label>Eye-tracking smoothing <span class="val" id="smv"></span></label>
+        <input type="range" id="sm" min="3" max="40" value="12" />
+        <div class="ends"><span>snappy, more jitter</span><span>smooth, more lag</span></div>
+      </div>
+      <div id="sheetMarginRow">
+        <label>Ignore glances past the sides <span class="val" id="mgv"></span></label>
+        <input type="range" id="mg" min="0" max="30" value="6" />
+        <div class="ends"><span>less</span><span>more</span></div>
+      </div>
+      <button id="autoFrameToggle" class="on">🔍 Auto-frame face: on</button>
+      <label>Camera zoom (manual — turn Auto-frame off) <span class="val" id="czv"></span></label>
+      <input type="range" id="cz" min="100" max="300" value="100" />
+      <div class="ends"><span>1×</span><span>3×</span></div>
+      <button id="poseToggle" class="on">🧭 Head-pose comp: on</button>
+      <button id="webcamToggle">Toggle camera preview</button>
+      <button id="dotToggle">Toggle gaze dot</button>
+      <button id="showSys">Show detected systems</button>
+    </details>
   </details>
-
-  <div class="row">
-    <button id="runBtn" disabled>▶ Follow eyes</button>
-    <button id="showBand">Hide band</button>
-  </div>
-  <div class="row">
-    <button id="snapBtn">▦ Snap: off</button>
-    <button id="driftBtn">🎯 Drift: off</button>
-  </div>
-  <button id="recenterBtn">⌖ Recenter to band center (R)</button>
-
-  <div class="group">The reading band</div>
-
-  <label>Reading zone size <span class="val" id="dzv"></span></label>
-  <input type="range" id="dz" min="4" max="40" value="18" />
-  <div class="ends"><span>small</span><span>large</span></div>
-
-  <label>Where you read on screen <span class="val" id="bpv"></span></label>
-  <input type="range" id="bp" min="12" max="55" value="50" />
-  <div class="ends"><span>near top</span><span>middle</span></div>
-
-  <div id="rightZoneRow">
-    <label>Turn the page when my eyes reach… <span class="val" id="rtv"></span></label>
-    <input type="range" id="rt" min="40" max="88" value="62" />
-    <div class="ends"><span>mid-line</span><span>line end</span></div>
-  </div>
-
-  <div class="group">How it scrolls</div>
-
-  <label>Page scroll speed <span class="val" id="spv"></span></label>
-  <input type="range" id="sp" min="60" max="1000" value="360" />
-  <div class="ends"><span>slow</span><span>fast</span></div>
-
-  <label>Wait before turning <span class="val" id="hdv"></span></label>
-  <input type="range" id="hd" min="0" max="1200" value="350" />
-  <div class="ends"><span>instant</span><span>patient (ignores quick glances)</span></div>
 
   <div class="row">
     <button id="saveBtn">💾 Save settings</button>
@@ -105,7 +129,7 @@
 
   <details id="autoScrollBox">
     <summary>🎵 Auto-scroll (time-based)</summary>
-    <div class="sub">Scroll to where you want to start, analyze the score, confirm the tempo, then play — the page advances on its own, in time.</div>
+    <div class="sub">Scroll to where you want to start, analyze the score, confirm the tempo, then play — the page advances on its own, in time. An alternative to Eye/wink tracking above, not used together with it.</div>
     <button id="analyzeScoreBtn">🎵 Analyze score</button>
     <div id="autoScrollSummary" class="sub"></div>
     <ul id="autoScrollWarnings"></ul>
@@ -134,28 +158,6 @@
     <button id="liveTempoToggle">🎤 Live tempo correction (experimental)</button>
     <div class="sub">Listens while you play and gently nudges the schedule toward your actual timing. Only active during playback.</div>
     <div id="liveTempoStatus" class="sub"></div>
-  </details>
-
-  <details>
-    <summary>Advanced</summary>
-    <div id="smoothnessRow">
-      <label>Eye-tracking smoothing <span class="val" id="smv"></span></label>
-      <input type="range" id="sm" min="3" max="40" value="12" />
-      <div class="ends"><span>snappy, more jitter</span><span>smooth, more lag</span></div>
-    </div>
-    <div id="sheetMarginRow">
-      <label>Ignore glances past the sides <span class="val" id="mgv"></span></label>
-      <input type="range" id="mg" min="0" max="30" value="6" />
-      <div class="ends"><span>less</span><span>more</span></div>
-    </div>
-    <button id="autoFrameToggle" class="on">🔍 Auto-frame face: on</button>
-    <label>Camera zoom (manual — turn Auto-frame off) <span class="val" id="czv"></span></label>
-    <input type="range" id="cz" min="100" max="300" value="100" />
-    <div class="ends"><span>1×</span><span>3×</span></div>
-    <button id="poseToggle" class="on">🧭 Head-pose comp: on</button>
-    <button id="webcamToggle">Toggle camera preview</button>
-    <button id="dotToggle">Toggle gaze dot</button>
-    <button id="showSys">Show detected systems</button>
   </details>
 
   <details>
