@@ -71,14 +71,6 @@ export function initAutoScrollUI() {
   $('sectionsSelect').addEventListener('change', () => {
     selectSection(parseInt($('sectionsSelect').value, 10));
   });
-  $('sectionNameInput').addEventListener('change', () => {
-    const as = state.autoScroll;
-    const sec = as.sections[as.activeSectionIndex];
-    if (!sec) return;
-    sec.name = $('sectionNameInput').value.trim() || `Section ${as.activeSectionIndex + 1}`;
-    $('sectionNameInput').value = sec.name;
-    renderSectionsList(); // refresh the dropdown's option label to match the rename
-  });
 
   $('liveTempoToggle').onclick = async () => {
     const as = state.autoScroll;
@@ -176,8 +168,7 @@ function renderSectionsList() {
   select.value = String(as.activeSectionIndex);
 
   const activeSec = as.sections[as.activeSectionIndex];
-  $('sectionNameInput').value = activeSec ? activeSec.name : '';
-  $('sectionMeta').textContent = activeSec && activeSec.tempoMarking ? `detected: ${activeSec.tempoMarking}` : '';
+  $('sectionMeta').textContent = activeSec && activeSec.tempoMarking ? `Tempo marking detected: ${activeSec.tempoMarking}` : '';
 
   renderTimeSigSuggestion(activeSec);
 }
