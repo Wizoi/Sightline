@@ -1,7 +1,7 @@
 import { state } from './appState.js';
 import { $, toast, setStatus } from './ui.js';
 import { analyzeScore } from './scoreAnalysis.js';
-import { startAutoScroll, pauseAutoScroll, stopAutoScroll, currentTempoLabel } from './autoScrollController.js';
+import { startAutoScroll, pauseAutoScroll, stopAutoScroll, currentTempoLabel, rebuildScheduleLive } from './autoScrollController.js';
 import { startLiveTempo, stopLiveTempo } from './liveTempo.js';
 import { setFollowing } from './followController.js';
 
@@ -14,6 +14,7 @@ export function initAutoScrollUI() {
     // sections and back restores what was set for each one.
     const sec = state.autoScroll.sections[state.autoScroll.activeSectionIndex];
     if (sec) sec.beatsPerMeasure = v;
+    rebuildScheduleLive();
   });
   $('beatsPerMeasureV').textContent = $('beatsPerMeasure').value;
 
@@ -23,6 +24,7 @@ export function initAutoScrollUI() {
     $('bpmV').textContent = $('bpmInput').value + ' bpm';
     const sec = state.autoScroll.sections[state.autoScroll.activeSectionIndex];
     if (sec) sec.bpm = v;
+    rebuildScheduleLive();
     refreshTempoLabel();
   });
   $('bpmV').textContent = $('bpmInput').value + ' bpm';

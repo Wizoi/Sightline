@@ -37,6 +37,32 @@ export function startAutoScroll() {
   return true;
 }
 
+// Rebuilds the schedule from the current beatsPerMeasure/bpm without
+// resetting position -- called whenever either changes while a schedule
+// already exists (playing or paused mid-way), so the sliders take effect
+// immediately instead of silently freezing until the next Stop+Start.
+// buildSchedule() bakes bpm/beatsPerMeasure in at build time and tick() only
+// ever reads the already-built schedule, so without this, changing either
+// slider mid-playback had no visible effect at all until restart -- found by
+// a user testing a real multi-part score (2026-07-20). Preserves musical
+// *position* (which system, how far through it), not elapsed seconds, since
+// changing tempo/meter changes what a given second-count even means -- the
+// same interpolation tick() already uses for scroll/highlight, so a rebuild
+// mid-system doesn't jump the scroll position, just changes the pace/meter
+// it continues at.
+export function rebuildScheduleLive() {
+  const as = state.autoScroll;
+  if (!as.schedule) return; // nothing started yet -- startAutoScroll() will build fresh
+  const { index, progress } = progressWithinSystem(as.schedule, as.scheduleElapsed);
+  as.schedule = buildSchedule({
+    measuresPerSystem: as.measuresPerSystem,
+    beatsPerMeasure: as.beatsPerMeasure,
+    bpm: as.bpm,
+  });
+  const s = index >= 0 ? as.schedule.systems[index] : null;
+  as.scheduleElapsed = s ? s.start + progress * s.duration : 0;
+}
+
 export function pauseAutoScroll() {
   state.autoScroll.playing = false;
   applyBand();

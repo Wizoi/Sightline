@@ -53,7 +53,20 @@ export function pageSystemsDetailed(rawLineRows) {
   const sp = [];
   for (let i = 1; i < lineRows.length; i++) sp.push(lineRows[i] - lineRows[i - 1]);
   const med = median(sp) || 5;
-  const staves = clusterVals(lineRows, Math.max(3, med * 1.9)).filter((g) => g.length >= 3);
+  // A staff needs at least 2 of its 5 lines to register as "ink" to count.
+  // Confirmed against a real multi-staff score (a clarinet quartet): a staff
+  // with several consecutive whole-measure rests produced only 2 detected
+  // lines instead of 5 (rest-heavy passages apparently don't always reinforce
+  // every line the way note-dense ones do), and dropping that staff entirely
+  // (the old >=3 threshold) didn't just lose one staff's extent -- it changed
+  // the gap between its neighbors enough to make the *whole page's* grouping
+  // look inconsistent, silently falling every system back to one-staff-per-
+  // system for a page that's actually cleanly 4-braced throughout. Verified
+  // across all 13 pages of that real file: this loosened threshold fixes the
+  // 3 affected pages and changes nothing on the other 10 (including
+  // single-staff instrument-part pages, where nothing this loose should ever
+  // spuriously cluster since real staff lines are never just 2px apart).
+  const staves = clusterVals(lineRows, Math.max(3, med * 1.9)).filter((g) => g.length >= 2);
   const staffInfo = staves.map((g) => ({ center: mean(g), rowMin: Math.min(...g), rowMax: Math.max(...g) }));
   if (staffInfo.length < 2) return staffInfo.slice();
 

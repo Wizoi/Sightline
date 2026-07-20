@@ -170,6 +170,34 @@ ink analysis for barlines, engraving-convention reasoning, PDF text-layer extrac
   easier than worst-case grand-staff piano engraving — don't over-invest in robustness the
   primary audience doesn't need yet.
 
+**A third real-file bug, found on a real 4-part braced clarinet-quartet score (2026-07-20,
+"Juggling Clowns" by Bill Malcolm): multi-staff system grouping silently degraded to one-staff-
+per-system across a *whole page* because a single staff went undetected.** The user reported the
+symptom directly — selecting the Score section only highlighted a thin single-staff band, and
+"next system" advanced by one staff instead of one printed system. Diagnosed by actually rendering
+the real file headlessly (Node + `pdfjs-dist`'s legacy build + `node-canvas`, since no browser
+automation was available in-session — see QA persona) and running the real `pageSystemsDetailed()`
+against it: one staff (Clarinet 2's, in a system with several consecutive whole-measure rests)
+produced only 2 of its 5 expected staff-line rows instead of the usual 4-5, and the old `>= 3
+lines to count as a staff` filter dropped it entirely. That alone would only cost one system's
+staff — but losing that one staff changed the *gap* between its still-detected neighbors enough to
+exceed the intra-system clustering cutoff, which cascaded into the whole page's grouping being
+judged "inconsistent" and falling back to per-staff systems everywhere, not just the one affected
+system. **Fixed** by loosening the per-staff line-count filter from `>= 3` to `>= 2` in
+`systemDetection.js` — verified (not assumed) safe by running *every* page of the real file through
+both thresholds: the 3 affected score pages fixed, the other 10 pages (including single-staff part
+pages, where nothing this loose should ever spuriously cluster) byte-for-byte unchanged. **General
+lesson, sharpening the "one missing staff" resilience gap already implicit in the grouping-
+consistency check's "tolerate at most one non-conforming group" design: a dropped staff's damage
+isn't contained to its own system — it can silently corrupt a neighboring system's gap statistics
+too, so the fix belongs at the detection threshold (stop losing the staff) rather than trying to
+patch the grouping logic to tolerate more missing staves after the fact.** Also notable
+methodologically: no headless-browser tool was available in this session (no `chromium-cli`, no
+installable Playwright browser — see QA persona), so verification used a from-scratch Node+
+`node-canvas` render harness instead of the project's usual Playwright-driven approach — a real
+file rendered through the *actual* PDF.js pipeline was still reachable even without a browser, and
+was what made the diagnosis conclusive rather than speculative.
+
 **Two accuracy bugs found and fixed against a real, complex piece (mixed meter, dense fast
 passages) — both via the same "verify against real data, don't tune blind" discipline:**
 - **`extractMeasureNumbers`'s y-range check had zero tolerance, and a measure number is engraved
@@ -517,6 +545,26 @@ hold-debounce, leaky-integrator drift correction, eased snapping.
   render entry point is the natural place to own that invalidation, same as it's the natural place
   to own re-entrancy guards.**
 
+- **A slider that updates `state` but nothing that reads a *derived* value built from that state can look completely dead, with no error anywhere.** A user testing a real score reported the
+  BPM and beats-per-measure sliders having "no effect" during active auto-scroll playback.
+  Root cause: `startAutoScroll()` calls `buildSchedule()` once, baking `beatsPerMeasure`/`bpm` into
+  `state.autoScroll.schedule`; `tick()` only ever reads that already-built schedule, never rebuilds
+  it. The two slider handlers (`autoScrollUI.js`) only ever wrote `state.autoScroll.beatsPerMeasure`/
+  `bpm` — correct, but inert until the next Stop+Start, with zero UI signal that anything was
+  frozen. ("Playback speed"/`tempoPct` is the one slider with true live effect, since `tick()` reads
+  it fresh every frame — this asymmetry between sliders that look identical but behave differently
+  is exactly what made the frozen ones feel like a bug rather than a documented limitation.)
+  **Fixed** (2026-07-20): added `rebuildScheduleLive()` in `autoScrollController.js`, called from
+  both slider handlers whenever a schedule already exists. It rebuilds the schedule from the current
+  values but **preserves musical position** (which system, what fraction through it — via
+  `progressWithinSystem`), not elapsed seconds, since a tempo/meter change redefines what a given
+  second-count even means; verified by hand that doubling BPM mid-system keeps the same system index
+  and ~50% progress rather than jumping. **General lesson: when a feature's live/frozen distinction
+  isn't visually obvious (two sliders that look the same but one takes effect immediately and the
+  other doesn't), either make all of them live or make the frozen ones visibly disabled/labeled —
+  the silent-freeze middle ground reads as broken even when every individual line of code is
+  behaving exactly as written.**
+
 **Open questions / future research:**
 - Whether snap-mode's fixed `dt*6` easing rate should itself be user-tunable (currently baked in)
   — no reported user complaints yet, so untouched.
@@ -675,7 +723,18 @@ not just plausible-looking.
   It's a one-off verification technique available *during a working session*, not automated
   regression coverage; don't describe it as the latter in code comments or elsewhere in this file
   — a stale claim to the contrary in `liveTempo.js` sat undetected until an independent review
-  caught it. If durable e2e coverage is ever wanted, it needs to be built and committed as real
+  caught it. **The `run` skill's Playwright path isn't always available, either** — confirmed
+  2026-07-20: no `chromium-cli` and no installable Playwright browser binary in this session's
+  sandbox. When that happens for a *rendering-pipeline* bug specifically (staff/barline/system
+  detection — anything downstream of `page.render()`), a real headless Node render harness is a
+  working fallback: `pdfjs-dist`'s `legacy/build/pdf.js` entry point plus the `canvas` npm package
+  (installed ad hoc with `--no-save`, not a project dependency) renders real PDF pages to a real
+  canvas outside a browser entirely, letting the *actual* detection functions run against the
+  *actual* rendering pipeline's output — the same real-data discipline as the collapseThickness/
+  pad=20/minFrac fixes above, just reached through a different door when the usual one is locked.
+  See the OMR persona's "Juggling Clowns" system-grouping fix for a worked example (diagnosed via
+  this exact technique, including a visual PNG crop of the suspect region for direct inspection).
+  If durable e2e coverage is ever wanted, it needs to be built and committed as real
   infrastructure (a Playwright dependency + CI job), not assumed to already exist.
 - **The most important lesson so far:** for algorithmic/detection work (staff detection, barline
   detection), a **synthetic-but-realistic fixture** (e.g. an actually-generated PDF with known,

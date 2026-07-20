@@ -47,6 +47,29 @@ describe('pageSystems', () => {
     expect(result).toEqual([12, 72, 117]);
   });
 
+  it('tolerates a staff with only 2 of 5 lines detected (real multi-staff score, rest-heavy passage)', () => {
+    // Real lineRows from page 1 of a clarinet-quartet score ("Juggling
+    // Clowns" by Bill Malcolm) -- 4 systems of 4 braced staves each. One
+    // staff (Clarinet 2's, in the 2nd system) has several consecutive
+    // whole-measure rests and produced only 2 detected line-rows instead of
+    // 5. Before the >=2 (was >=3) fix, dropping that staff entirely didn't
+    // just shrink one system -- it fragmented the *whole page* into 15
+    // single-staff "systems" (verified against the real file), because the
+    // neighbors' gap grew past the grouping cutoff once the staff between
+    // them vanished. This must group into exactly 4 systems, one per
+    // printed line, not one per staff.
+    const rows = [
+      139, 144, 149, 158, 197, 202, 211, 216, 255, 259, 264, 269, 274, 312, 317, 322, 327,
+      403, 408, 413, 418, 461, 466, 480, 519, 528, 533, 538, 581, 586, 591, 596,
+      667, 672, 677, 682, 687, 725, 730, 735, 744, 783, 788, 797, 802, 841, 845, 850, 855, 860,
+      931, 936, 941, 950, 989, 994, 998, 1003, 1008, 1047, 1051, 1056, 1061, 1066, 1104, 1109, 1114, 1119, 1124,
+    ];
+    const systems = pageSystemsDetailed(rows);
+    expect(systems).toHaveLength(4);
+    expect(systems.map((s) => Math.round(s.rowMin))).toEqual([139, 403, 667, 931]);
+    expect(systems.map((s) => Math.round(s.rowMax))).toEqual([327, 596, 860, 1124]);
+  });
+
   it('collapses thick anti-aliased lines (multiple adjacent detected rows per physical line) before clustering into staves', () => {
     // Confirmed against a real rendered PDF: each physical staff line came
     // back as 2 adjacent "ink" rows (gap 1) rather than exactly 1, due to
