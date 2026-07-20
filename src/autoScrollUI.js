@@ -3,6 +3,7 @@ import { $, toast, setStatus } from './ui.js';
 import { analyzeScore } from './scoreAnalysis.js';
 import { startAutoScroll, pauseAutoScroll, stopAutoScroll, currentTempoLabel } from './autoScrollController.js';
 import { startLiveTempo, stopLiveTempo } from './liveTempo.js';
+import { setFollowing } from './followController.js';
 
 export function initAutoScrollUI() {
   $('beatsPerMeasure').addEventListener('input', () => {
@@ -38,14 +39,18 @@ export function initAutoScrollUI() {
 
   $('autoScrollStart').onclick = () => {
     if (!startAutoScroll()) return;
+    // Eye/wink tracking and Auto-scroll are alternatives, not used
+    // together — both drive window.scrollTo() on their own rAF loop.
+    if (state.following) {
+      setFollowing(false);
+      toast('Follow eyes paused — switched to Auto-scroll');
+    }
     $('autoScrollStart').disabled = true;
     $('autoScrollPause').disabled = false;
     refreshTempoLabel();
   };
   $('autoScrollPause').onclick = () => {
-    pauseAutoScroll();
-    $('autoScrollStart').disabled = false;
-    $('autoScrollPause').disabled = true;
+    pauseAutoScrollUI();
     setStatus('', 'auto-scroll paused');
   };
 
@@ -66,6 +71,15 @@ export function initAutoScrollUI() {
   };
 
   if (state.autoScroll.analyzed) renderSummary({ systemCount: state.autoScroll.systemBands.length, warnings: [] });
+}
+
+// Pauses auto-scroll and syncs its Start/Pause button state — shared by
+// the Pause button itself and by main.js, which calls this when the user
+// switches to Follow eyes while auto-scroll is playing.
+export function pauseAutoScrollUI() {
+  pauseAutoScroll();
+  $('autoScrollStart').disabled = false;
+  $('autoScrollPause').disabled = true;
 }
 
 function refreshTempoLabel() {

@@ -1,5 +1,5 @@
 import { cfg, state } from './appState.js';
-import { setStatus, zoneText, velText } from './ui.js';
+import { $, setStatus, zoneText, velText } from './ui.js';
 import { createFollowState, decide } from './lib/followLogic.js';
 import { describeWinkStatus } from './lib/winkStatus.js';
 
@@ -45,4 +45,14 @@ export function clearSnapTarget() {
 
 export function startFollowLoop() {
   requestAnimationFrame(tick);
+}
+
+// Central place to flip state.following on/off, so every caller (the
+// runBtn click, the foot-pedal/click-anywhere handler, the Space key, and
+// autoScrollUI.js pausing this when auto-scroll starts) gets the same
+// button-text/status/snap-target bookkeeping instead of duplicating it.
+export function setFollowing(on) {
+  state.following = on;
+  $('runBtn').textContent = on ? '⏸ Following…' : '▶ Follow eyes';
+  if (!on) { setStatus('', 'paused'); clearSnapTarget(); }
 }

@@ -7,9 +7,9 @@ import { runCalibration, recenter, currentFingerprint } from './calibration.js';
 import { calibMismatch } from './lib/calibrationModel.js';
 import { runAccuracyTest, beginAccuracySequence } from './accuracyTest.js';
 import { runWinkCalibration, beginWinkCalibrationSequence } from './winkCalibrate.js';
-import { startFollowLoop, clearSnapTarget } from './followController.js';
+import { startFollowLoop, setFollowing } from './followController.js';
 import { initSettingsUI, loadSettings } from './settings.js';
-import { initAutoScrollUI } from './autoScrollUI.js';
+import { initAutoScrollUI, pauseAutoScrollUI } from './autoScrollUI.js';
 import { startAutoScrollLoop } from './autoScrollController.js';
 
 initSettingsUI();
@@ -29,10 +29,17 @@ $('file').onchange = (e) => {
 $('camBtn').onclick = startCamera;
 $('calibBtn').onclick = runCalibration;
 $('runBtn').onclick = () => {
-  state.following = !state.following;
-  $('runBtn').textContent = state.following ? '⏸ Following…' : '▶ Follow eyes';
-  if (!state.following) { setStatus('', 'paused'); clearSnapTarget(); }
-  toast(state.following ? 'Following' : 'Paused');
+  const turningOn = !state.following;
+  // Eye/wink tracking and time-based Auto-scroll are alternatives, not
+  // used together — both drive window.scrollTo() on their own rAF loop,
+  // so running both at once would have them fight over scroll position.
+  if (turningOn && state.autoScroll.playing) {
+    pauseAutoScrollUI();
+    toast('Auto-scroll paused — switched to Follow eyes');
+  } else {
+    toast(turningOn ? 'Following' : 'Paused');
+  }
+  setFollowing(turningOn);
 };
 $('recenterBtn').onclick = recenter;
 $('testBtn').onclick = runAccuracyTest;
