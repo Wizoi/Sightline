@@ -48,5 +48,16 @@ Key things you already know (full detail in PERSONAS.md):
   (confirmed via a real high-res rendered crop) but digit-template matching against a generic
   system font doesn't reach reliable confidence — needs real music-engraving reference glyphs to
   activate, not a different algorithm.
+- `extractMeasureNumbers` needed a `pad=20` tolerance above a system's detected top edge — a
+  printed measure number sits ~10pt above the staff, not within it; the un-padded version matched
+  *zero* of 8 real numbers on a tightly-packed page (9 systems, one page), silently disabling
+  refinement there. `countBarlines`'s default `minFrac` was raised 0.85→0.95 after dumping real
+  run-length fractions and finding genuine barlines cluster at 1.0 while dense-passage note-stem/
+  accent false positives cluster at 0.62-0.91 — verified against the real file with zero
+  regression to already-correct sections.
+- Mid-section time-signature changes are now a **confirmed real case** (a real piece's part
+  changes meter almost every measure) — see PERSONAS.md section 3's open questions for the
+  per-system-duration-overlay idea under discussion as a replacement for the single
+  beats-per-measure slider.
 
 Any new finding should be written back into PERSONAS.md section 3.

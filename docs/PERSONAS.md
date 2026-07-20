@@ -163,6 +163,36 @@ ink analysis for barlines, engraving-convention reasoning, PDF text-layer extrac
   easier than worst-case grand-staff piano engraving — don't over-invest in robustness the
   primary audience doesn't need yet.
 
+**Two accuracy bugs found and fixed against a real, complex piece (mixed meter, dense fast
+passages) — both via the same "verify against real data, don't tune blind" discipline:**
+- **`extractMeasureNumbers`'s y-range check had zero tolerance, and a measure number is engraved
+  *above* the staff, not within it.** Consistently ~10pt above a system's own detected top edge on
+  every page checked. A page with generously-spaced systems could still match by coincidence with
+  no tolerance at all, which is exactly why this went unnoticed until a *tightly*-packed page (9
+  systems on one page) surfaced it: the un-padded check matched **zero of 8** real printed numbers
+  on that page, leaving every system on it stuck with the raw pixel estimate. Fixed with a
+  `pad=20` tolerance above `yTop` (a real margin over the observed ~10pt, still well under
+  typical system-to-system spacing so it can't reach into a neighboring system's own number) and
+  "closest wins" tie-breaking. This alone fixed the majority of a real anomaly a user spotted
+  (measure counts of 18 and 23 among neighbors of 4-9) — the anomalies weren't really about the
+  barline heuristic at all; refinement (which should have overridden them) simply wasn't running
+  on that page.
+- **Even after that fix, the two positions refinement can never reach — a section's first and
+  last system, no adjacent known number to diff against — stayed elevated.** Dumped the actual
+  run-length *fraction* (not just pass/fail at one threshold) for every candidate column on the
+  worst page and found a clean signal: genuine barlines cluster at exactly 1.0 (full band
+  height); false positives (note stems, accents, staccato dots in a dense, fast passage) cluster
+  at 0.62-0.91 — tall, but not *full*. Raised `countBarlines`'s default `minFrac` from 0.85 to
+  0.95 to exclude that band. Verified end-to-end against the real file: the already-correct
+  "Score" section's counts were byte-for-byte unchanged (no regression), while the exposed
+  first/last-system anomalies dropped substantially (e.g. 11→4, 16→9, 14→8) — real improvement,
+  though not perfect in every case; some residual overcounting likely remains for the very
+  densest passages. **General lesson: when a pass/fail threshold's false positives and true
+  positives turn out to be numerically close (0.85 vs. actual barlines), don't just eyeball
+  candidate positions — dump the actual continuous metric across a real sample and look for
+  where the two populations actually separate**, the same evidence-based approach that already
+  paid off for `collapseThickness` and the text-extraction bugs above.
+
 **PDF text-layer extraction — a second, much more reliable detection technique (added for the
 "score sections" feature: splitting a full-score-plus-parts PDF into named, independently
 tempo/time-signature-scoped sections):**
@@ -272,6 +302,17 @@ surface as more than a declined "no suggestion"):**
   any future best-effort detector in this domain, not just this one.
 
 **Open questions / future research:**
+- **Mid-section time-signature changes are now a confirmed real case, not a hypothetical.** A
+  real test piece's Alto Clarinet part changes meter almost every measure (5/8, 7/8, 3/4, 4/4,
+  ...) — the section-level `beatsPerMeasure` model (Feature Strategy verdict, this section above)
+  cannot be *correct* for a piece like this no matter what single value is set, since duration is
+  `measures × one beatsPerMeasure` for the whole section. Under discussion: instead of trying to
+  auto-detect the actual per-measure time signature (already the failed Phase 2 approach), drop
+  the single beats-per-measure slider in favor of computing and displaying each system's
+  scheduled *duration* directly (seconds, or another musician-legible unit) as an overlay next to
+  the system on the page — sidesteps needing an exact time-signature value at all, and lets a
+  user directly see/correct the number actually driving playback. Not yet built; revisit here
+  once a direction is chosen.
 - Repeat signs / codas / D.S. al Fine and their effect on auto-scroll's linear schedule — out of
   v1 scope, unaddressed.
 - Whether note-head density (rather than just barline count) could refine the "assume uniform
@@ -438,6 +479,15 @@ our real users actually read music" check.
   incrementally from the inside.** Default to an explicit mode-tab per top-level choice for any
   *future* additional mode, rather than adding another flat section and rediscovering the same
   problem.
+- **Adding the tab switcher didn't automatically make every mode-specific UI element respect
+  it.** The reading-band overlay had already been fixed once to hide "while auto-scroll is
+  playing," but a user caught it still showing while paused on the Tempo tab — the earlier fix
+  checked *play state*, not *which tab is active*, and the two aren't the same thing (tabs are a
+  pure visibility toggle, not a stop; auto-scroll can keep running after switching back to
+  Eye/Wink). **General lesson: when a UI element belongs conceptually to one mode/tab, its
+  visibility condition should check the active tab directly, not a proxy state that happens to
+  usually correlate with it** — the proxy will eventually be wrong in some reachable combination
+  a user finds before you do.
 
 **Open questions / future research:**
 - No current handling for **duet/ensemble parts with cues** (small cue notes from another

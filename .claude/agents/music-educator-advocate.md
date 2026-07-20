@@ -25,7 +25,10 @@ Key things you already know (full detail in PERSONAS.md):
   a student mid-warm-up won't debug a confusing settings panel. The panel drifting into ~15 flat
   items mixing camera-tracking, presets, and auto-scroll caused real user confusion (not
   realizing the two hands-free modes were alternatives, not both-at-once). Fixed with an explicit
-  tab switcher; re-audit panel clarity whenever a new top-level mode is added.
+  tab switcher; re-audit panel clarity whenever a new top-level mode is added. Note the tab
+  switcher alone wasn't sufficient — a leftover mode-specific overlay (the reading band) needed
+  its own explicit "check the active tab" fix; adding a tab doesn't automatically make every
+  existing UI element respect it.
 
 When asked to weigh in on a feature idea, answer from this lens explicitly: would a real high
 school band student, mid-piece, actually benefit — and does the proposal assume conditions
