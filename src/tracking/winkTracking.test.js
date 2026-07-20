@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { cfg, state } from '../appState.js';
 import { onFrame, resetWinkTrackingState, id, needsCalibration } from './winkTracking.js';
+import { deadZoneBounds } from '../lib/followLogic.js';
 
 const OPEN = 0.05, CLOSED = 0.9;
 
@@ -103,6 +104,38 @@ describe('winkTracking', () => {
     expect(down.uy).toBeLessThan(1);
 
     now.mockRestore();
+  });
+
+  it('stays inside the real (capped) trigger zone even when the dead zone would otherwise swallow it', () => {
+    // Regression: with a band near the top of the screen and a wide dead
+    // zone (both individually well within the sliders' ranges — 12-55% for
+    // band position, 4-40% for dead zone), followLogic.decide() caps the
+    // dead zone per-direction so "up" stays reachable (see deadZoneBounds).
+    // The old formula here re-derived the trigger edge from raw
+    // cfg.deadZoneFrac, ignoring that cap, and could synthesize a point that
+    // never actually cleared decide()'s real (smaller) dead zone — a left
+    // wink would silently do nothing.
+    const savedBandPos = cfg.bandPos, savedDeadZone = cfg.deadZoneFrac;
+    cfg.bandPos = 0.2;
+    cfg.deadZoneFrac = 0.2;
+    const H = 800;
+    try {
+      const now = vi.spyOn(performance, 'now');
+      now.mockReturnValue(0);
+      onFrame(null, makeRes());
+      now.mockReturnValue(10);
+      onFrame(null, makeRes({ leftBlink: CLOSED }), 0, 0, H);
+      now.mockReturnValue(300);
+      const result = onFrame(null, makeRes({ leftBlink: CLOSED }), 0, 0, H);
+      now.mockRestore();
+
+      const { center, deadUp } = deadZoneBounds(cfg, H);
+      // "up" only triggers in decide() when smoothY < center - deadUp.
+      expect(result.uy * H).toBeLessThan(center - deadUp);
+    } finally {
+      cfg.bandPos = savedBandPos;
+      cfg.deadZoneFrac = savedDeadZone;
+    }
   });
 
   it('pushes further past the dead-zone edge as wink strength increases', () => {

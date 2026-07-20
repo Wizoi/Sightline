@@ -15,6 +15,28 @@ export function createFollowState() {
   };
 }
 
+// Per-direction dead-zone reach in pixels, shared by decide() and anything
+// else that needs to know where the up/down trigger zones actually are (e.g.
+// wink tracking synthesizing a gaze point — see winkTracking.js). Capped per
+// direction so it can never swallow the *entire* travel room above or below
+// the band: a band positioned near the top of the screen (bandPos <=
+// deadZoneFrac — well within the sliders' range) would otherwise make the
+// "up" trigger mathematically unreachable, since offset's minimum possible
+// value is -center. A single source of truth for this cap matters because a
+// second caller re-deriving it from raw cfg values (not the capped result)
+// can silently synthesize a point that never actually clears the real
+// trigger zone — this happened once already with the wink tracker.
+export function deadZoneBounds(cfg, H) {
+  const center = H * cfg.bandPos;
+  const dead = cfg.deadZoneFrac * H;
+  const minRoom = 8; // px
+  return {
+    center,
+    deadUp: Math.min(dead, Math.max(0, center - minRoom)),
+    deadDown: Math.min(dead, Math.max(0, H - center - minRoom)),
+  };
+}
+
 // input: {
 //   now, dt, cfg, biasY,
 //   rawGaze: { x, y, t } | null,
@@ -58,18 +80,7 @@ export function decide(state, input) {
   smoothX = (smoothX == null) ? rawGaze.x : smoothX + alpha * (rawGaze.x - smoothX);
   smoothY = (smoothY == null) ? rawGaze.y : smoothY + alpha * (rawGaze.y - smoothY);
 
-  const center = H * cfg.bandPos;
-  const dead = cfg.deadZoneFrac * H;
-  // The dead zone is capped per direction so it can never swallow the *entire*
-  // travel room above or below the band. Without this, a band positioned near
-  // the top of the screen (bandPos <= deadZoneFrac — well within the sliders'
-  // range, and exactly what "near top" tuning produces) makes the "up" trigger
-  // mathematically unreachable: no on-screen gaze position could ever satisfy
-  // offset < -dead, since offset's minimum possible value is -center. Leaving
-  // a minimum sliver (minRoom) keeps both directions always reachable.
-  const minRoom = 8; // px
-  const deadUp = Math.min(dead, Math.max(0, center - minRoom));
-  const deadDown = Math.min(dead, Math.max(0, H - center - minRoom));
+  const { center, deadUp, deadDown } = deadZoneBounds(cfg, H);
   const offset = smoothY - center;
   const inBand = offset >= -deadUp && offset <= deadDown;
   const rightBound = W * (1 - cfg.sheetMargin);

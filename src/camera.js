@@ -4,11 +4,17 @@ import { $, video, setStatus, showRecalBanner } from './ui.js';
 import { loadCalibration, calibMismatch, currentFingerprint, calibModelId } from './calibration.js';
 import { getActiveTracking, canFollow } from './tracking/index.js';
 
-// MediaPipe's WASM runtime and the face-landmarker model are large (tens of
-// MB) binary ML assets — they're loaded from Google/jsDelivr's CDN at
-// runtime rather than vendored into this repo, same as before.
-const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+// MediaPipe's WASM runtime and the face-landmarker model are served from
+// this app's own origin (public/mediapipe/, populated at dev/build time by
+// scripts/fetch-mediapipe-assets.mjs) rather than a third-party CDN — the
+// combined ~13MB turned out to be well within what's reasonable to
+// self-host, and this app's core audience (school networks/devices) is
+// exactly the audience most likely to have Google/jsDelivr's domains
+// blocked by a content filter, which previously meant the app simply
+// couldn't start. Inference still runs entirely on-device either way; only
+// where the (non-personal) model weights are *fetched from* changed.
+const WASM_URL = import.meta.env.BASE_URL + 'mediapipe/wasm';
+const MODEL_URL = import.meta.env.BASE_URL + 'mediapipe/models/face_landmarker.task';
 
 export const PROC_W = 640, PROC_H = 480;  // detection runs on this face-cropped, upscaled canvas
 const procCanvas = document.createElement('canvas');
@@ -130,7 +136,7 @@ function predict() {
   // gaze mapping, wink detection, or (in future) something else. It returns
   // unclamped screen-fraction coordinates, or null if there's nothing to
   // report this frame (blinking, not calibrated, no wink held, etc).
-  const result = getActiveTracking().onFrame(lm, res, PROC_W, PROC_H);
+  const result = getActiveTracking().onFrame(lm, res, PROC_W, PROC_H, window.innerHeight);
   if (state.trackingType === 'wink') {
     // Live readout so wink strength/reliability can be tuned by eye instead
     // of guesswork — scores are MediaPipe's eyeBlinkLeft/eyeBlinkRight

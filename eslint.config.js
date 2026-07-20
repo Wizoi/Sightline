@@ -17,7 +17,7 @@ export default [
     },
   },
   {
-    files: ['src/lib/**/*.test.js', 'vite.config.js'],
+    files: ['src/lib/**/*.test.js', 'vite.config.js', 'scripts/**/*.mjs'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -28,6 +28,6 @@ export default [
     },
   },
   {
-    ignores: ['dist/', 'node_modules/', 'public/audio/'],
+    ignores: ['dist/', 'node_modules/', 'public/audio/', 'public/mediapipe/'],
   },
 ];

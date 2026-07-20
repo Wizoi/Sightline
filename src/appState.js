@@ -92,8 +92,3 @@ export const state = {
     tempoCorrection: { correction: 1, lastOnsetAt: null },
   },
 };
-
-// Switching pose/flat feature space invalidates any saved calibration.
-export function calibModelId() {
-  return (state.usePose ? 'pose' : 'flat') + '-blendquad-v3';
-}

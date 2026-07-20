@@ -5,7 +5,9 @@
   "description": "Hands-free sheet-music page turner driven by webcam eye tracking.",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/fetch-mediapipe-assets.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/fetch-mediapipe-assets.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",

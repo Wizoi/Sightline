@@ -24,5 +24,8 @@ function selectTab(activeBtnId) {
 
 export function initTabsUI() {
   TABS.forEach(({ btn }) => { $(btn).onclick = () => selectTab(btn); });
-  selectTab('tabAutoScroll');
+  // Eye/Wink is the default tracking type and what the README's quick start
+  // leads with -- a first-time load should show that panel (and the reading
+  // band), not Tempo/auto-scroll.
+  selectTab('tabTracking');
 }

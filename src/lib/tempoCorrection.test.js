@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createCorrectionState, applyOnset, decayIfQuiet, correctionStatus } from './tempoCorrection.js';
+import { buildSchedule, beatTimestamps, nearestBeatTime } from './tempoSchedule.js';
 
 const beatDuration = 0.5; // matches 120bpm in tempoSchedule.test.js, for consistency
 
@@ -32,10 +33,33 @@ describe('applyOnset', () => {
     expect(r.lastOnsetAt).toBe(1.6); // still recorded as "something was heard"
   });
 
+  it('rejects a real nearest-beat match that lands near the ambiguous midpoint between two beats', () => {
+    // Regression: tempoSchedule.js's nearestBeatTime() always returns the
+    // *closest* grid point on a uniform beat grid, so the error it can ever
+    // produce is bounded to at most half a beat — a threshold of 0.5 (the
+    // old value) could therefore never reject anything reachable through the
+    // real pipeline, even though applyOnset()'s own threshold check works
+    // fine in isolation (see the hand-crafted "implausibly-timed" test
+    // above). This test goes through the real nearestBeatTime() lookup,
+    // like the live pipeline (src/liveTempo.js) does, to prove the gate
+    // actually filters something end-to-end.
+    const schedule = buildSchedule({ measuresPerSystem: [4], beatsPerMeasure: 4, bpm: 120 }); // secPerBeat = 0.5
+    const beats = beatTimestamps(schedule, 4); // [0, 0.5, 1.0, 1.5, ...]
+    const onsetTime = 0.24; // almost exactly between beat 0 (t=0) and beat 1 (t=0.5)
+    const expectedBeatTime = nearestBeatTime(beats, onsetTime);
+    expect(expectedBeatTime).toBe(0); // nearest is beat 0, distance 0.24 -> beatFrac 0.48
+
+    const state = createCorrectionState();
+    const r = applyOnset(state, { onsetTime, expectedBeatTime, beatDuration: 0.5 });
+    expect(r.correction).toBe(1); // rejected as too ambiguous to trust, not nudged
+  });
+
   it('clamps the correction at the configured bounds even with repeated large nudges', () => {
     let state = createCorrectionState();
     for (let i = 0; i < 50; i++) {
-      state = applyOnset(state, { onsetTime: 1.75, expectedBeatTime: 2.0, beatDuration }); // early by 0.25 = half a beat
+      // early by 0.15 = 0.3 of a beat: large enough to nudge every time, but
+      // inside IMPLAUSIBLE_BEAT_FRACTION so it isn't rejected as ambiguous.
+      state = applyOnset(state, { onsetTime: 1.85, expectedBeatTime: 2.0, beatDuration });
     }
     expect(state.correction).toBeLessThanOrEqual(1.15);
     expect(state.correction).toBeGreaterThan(1.1);

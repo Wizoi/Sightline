@@ -18,3 +18,8 @@ desktop.ini
 node_modules/
 dist/
 *.log
+
+# MediaPipe WASM runtime + model, fetched by scripts/fetch-mediapipe-assets.mjs
+# (runs automatically before dev/build) so they're served same-origin instead
+# of from a third-party CDN at runtime — not checked in, regenerated locally.
+public/mediapipe/

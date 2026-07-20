@@ -3,9 +3,11 @@
 // correction logic in lib/tempoCorrection.js. Everything here is plumbing;
 // see tempoCorrection.js's header for the actual design rationale.
 //
-// Deliberately not covered by unit tests — it only does something inside a
-// real AudioContext/getUserMedia, which Vitest doesn't provide. Verified via
-// a synthetic-audio Playwright test instead (see e2e/).
+// Not covered by an automated test — it only does something inside a real
+// AudioContext/getUserMedia, which Vitest doesn't provide, and this project
+// has no Playwright/e2e harness (see docs/PERSONAS.md persona 8). Verified
+// manually against a live mic instead. The pure logic it wires together
+// (lib/tempoCorrection.js, lib/tempoSchedule.js) is unit tested.
 
 import { state } from './appState.js';
 import { toast } from './ui.js';
@@ -21,7 +23,17 @@ export async function startLiveTempo() {
   if (audioCtx) return; // already running
   const as = state.autoScroll;
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Browsers apply echo cancellation, noise suppression, and auto-gain to
+    // getUserMedia audio by default — all three work against onset
+    // detection here: noise suppression is tuned to remove non-speech
+    // transients (exactly the instrument attacks being listened for), and
+    // auto-gain compresses the rising-energy jump the detector watches for.
+    // The detector already does its own adaptive noise-floor tracking (see
+    // public/audio/onsetProcessor.js), so raw, unprocessed input is what it
+    // actually wants.
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
     audioCtx = new AudioContext();
     // Lives in public/ (a real, stable-URL static file), not bundled from
     // src/ — see public/audio/onsetProcessor.js's header for why.

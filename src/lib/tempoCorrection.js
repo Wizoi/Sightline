@@ -13,11 +13,18 @@ const MIN_CORRECTION = 0.85, MAX_CORRECTION = 1.15;
 // on purpose; this is a gentle trim toward the performer's actual timing,
 // not a snap-to-tempo.
 const GAIN = 0.15;
-// An onset timed more than this fraction of a beat away from the nearest
-// expected beat is more likely a mis-detection (matched to the wrong beat
-// entirely) than real tempo drift — ignore it rather than let a bad match
-// whipsaw the correction.
-const IMPLAUSIBLE_BEAT_FRACTION = 0.5;
+// tempoSchedule.js's nearestBeatTime() always matches an onset to the
+// *closest* point on a uniform beat grid, so the resulting error can never
+// exceed half a beat (0.5) — that's a property of nearest-neighbor lookup,
+// not a measure of how trustworthy the match is. A threshold at (or above)
+// 0.5 therefore can never reject anything in practice: it isn't "implausible
+// beyond half a beat," it's "always true." The real ambiguity is matches
+// that land *close to* the midpoint between two beats (beatFrac near 0.5) —
+// there, "closest" is nearly a coin flip between two candidate beats, and
+// applying that nudge is as likely to fight real tempo drift as track it.
+// Keeping this comfortably below 0.5 rejects that ambiguous band instead of
+// silently accepting every match nearest-neighbor lookup can ever produce.
+const IMPLAUSIBLE_BEAT_FRACTION = 0.35;
 
 export function createCorrectionState() {
   return { correction: 1, lastOnsetAt: null };

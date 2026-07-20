@@ -1,6 +1,7 @@
 import { cfg, state } from '../appState.js';
 import { eyeBlinkScores } from '../lib/gazeMath.js';
 import { createWinkState, decideWink } from '../lib/winkLogic.js';
+import { deadZoneBounds } from '../lib/followLogic.js';
 
 export const id = 'wink';
 export const label = 'Wink tracking (left eye = up, right eye = down)';
@@ -21,7 +22,16 @@ export function resetWinkTrackingState() { winkState = createWinkState(); }
 // reading band's dead-zone edge in that direction. It plugs straight into
 // the same up/down trigger path real gaze uses (followLogic.decide()) — no
 // changes needed there.
-export function onFrame(_lm, res) {
+//
+// The dead-zone edge must be computed with decide()'s own *capped* geometry
+// (lib/followLogic.js's deadZoneBounds), not raw cfg.deadZoneFrac — decide()
+// caps the dead zone per direction so a band positioned near the top of the
+// screen can't make the "up" trigger unreachable, and a synthesized point
+// that ignores that cap can land back inside the (now-larger, uncapped) dead
+// zone it was meant to clear, silently never triggering. viewportH defaults
+// to a representative laptop viewport height for callers (e.g. tests) that
+// don't have a real window to measure.
+export function onFrame(_lm, res, _procW, _procH, viewportH = 800) {
   const { left, right } = eyeBlinkScores(res);
   state.winkScores = { left, right };   // live debug readout, shown in Setup
   const now = performance.now();
@@ -35,16 +45,20 @@ export function onFrame(_lm, res) {
   winkState = result.state;
   if (!result.wink) return null;
 
-  // strength 0 -> just past the dead-zone edge (still has to clear decide()'s
-  // own hold timer, like a real gentle glance); strength 1 -> a strong push.
-  const reach = 0.02 + 0.4 * state.winkStrength;
-  const rawUy = result.wink === 'left'
-    ? cfg.bandPos - cfg.deadZoneFrac - reach
-    : cfg.bandPos + cfg.deadZoneFrac + reach;
-  // Keep strictly inside (0, 1): decide()'s "looking away" check rejects
-  // gaze sitting exactly on the screen edge (rawGaze.y > 0 && < H), which a
-  // high wink strength could otherwise push this to exactly, at which point
-  // the wink would silently read as "looking away" instead of triggering.
-  const uy = Math.min(0.98, Math.max(0.02, rawUy));
-  return { ux: 0.5, uy };
+  // Place the point at a fraction ("depth") of the way *through* the real
+  // reachable trigger sliver, rather than a fixed reach past its edge — the
+  // sliver's own size is capped by deadZoneBounds and can be as small as
+  // ~8px (band near the top + a wide dead zone), so a fixed absolute reach
+  // can overshoot straight past a tiny sliver and back out the other side.
+  // depth 0..1 always lands strictly inside (never touches either edge, so
+  // it can never register as "looking away" — see decide()'s onScreenY
+  // check): strength 0 -> just inside the near edge (still has to clear
+  // decide()'s own hold timer, like a real gentle glance); strength 1 ->
+  // pushed deep into the zone, close to (but never at) the far edge.
+  const depth = 0.15 + 0.8 * state.winkStrength;
+  const { center, deadUp, deadDown } = deadZoneBounds(cfg, viewportH);
+  const rawY = result.wink === 'left'
+    ? (center - deadUp) * (1 - depth)                       // zone is (0, center-deadUp)
+    : (center + deadDown) + depth * (viewportH - (center + deadDown)); // zone is (center+deadDown, H)
+  return { ux: 0.5, uy: rawY / viewportH };
 }

@@ -93,11 +93,15 @@ window.addEventListener('keydown', (e) => {
   else if (e.key.toLowerCase() === 'm') toggleMin();
 });
 
+// Debounced so a drag-resize re-renders once after it settles, not on every
+// intermediate event — renderAll() itself is also safe to call repeatedly
+// (see its generation-counter guard), but there's no reason to re-render
+// every PDF page several times a second while the window is mid-drag.
 let resizeTimer;
 window.addEventListener('resize', () => {
-  if (state.pdfDoc) renderAll();
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
+    if (state.pdfDoc) renderAll();
     if (state.calibrated && state.calibFp) {
       const reasons = calibMismatch(state.calibFp, currentFingerprint());
       if (reasons.length) showRecalBanner(reasons);

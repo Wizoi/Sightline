@@ -249,9 +249,10 @@ smoothly (or snaps) based on your gaze.
 
 - A **desktop or laptop with a webcam**.
 - **Chrome or Edge** (they support the camera and the face model well).
-- Internet access on **first load** (to fetch MediaPipe's face-tracking model and WASM
-  runtime — these are large ML assets loaded from Google's CDN rather than bundled; your
-  browser caches them after the first visit). PDF.js is bundled with the app itself.
+
+MediaPipe's face-tracking model and WASM runtime, and PDF.js, are all bundled with the app itself
+and served from the same place as everything else — no third-party CDN requests, so school
+networks that filter external domains won't block it.
 
 No sample scores are included — load your own PDF. (PDFs are git-ignored so your music never
 ends up in the repo.)
