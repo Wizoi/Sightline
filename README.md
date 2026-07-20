@@ -25,6 +25,7 @@ you. No pedals to tap, no hands off the instrument.
 - [Quick start](#quick-start)
 - [Your privacy](#your-privacy)
 - [Using Sightline](#using-sightline)
+- [Auto-scroll (time-based)](#auto-scroll-time-based)
 - [Tuning](#tuning)
 - [Getting the best accuracy](#getting-the-best-accuracy)
 - [Troubleshooting](#troubleshooting)
@@ -46,6 +47,11 @@ Want to run your own copy or work on the code? See [Development](#development) a
 
 ## Quick start
 
+Sightline turns pages two independent ways — hands-free **eye/wink tracking** (below) or
+**time-based auto-scroll**, which follows a tempo you set instead of your eyes. Switch between
+them with the tabs at the top of the panel. This quick start covers eye/wink tracking; see
+[Auto-scroll (time-based)](#auto-scroll-time-based) for the other.
+
 1. **Load your music** — click *Load PDF* and choose any PDF of your score or part.
 2. **Start the camera** — click *Start camera* and allow access when your browser asks.
 3. **Calibrate** — nine dots appear; look at each one and click it, holding your gaze until it turns green. Do this sitting the way you'll actually play.
@@ -58,12 +64,14 @@ Calibration is saved, so next time you can skip straight to loading your music.
 
 **Everything happens on your own computer, inside your browser.** Your camera feed is used
 only to work out where you're looking, moment to moment — it is never recorded, saved, or
-sent anywhere. There is no account, no server, and no upload. Close the tab and nothing is
-kept except your saved settings (which live only in your browser).
+sent anywhere. The same goes for your microphone if you turn on *Live tempo correction*: audio
+is analyzed locally, in real time, and never recorded or uploaded. There is no account, no
+server, and no upload. Close the tab and nothing is kept except your saved settings (which live
+only in your browser).
 
 ## Using Sightline
 
-**Tracking type** (in Setup) picks how Sightline reads your intent to turn the page:
+**Tracking type** (in the **Eye/Wink** tab) picks how Sightline reads your intent to turn the page:
 - **Wink tracking** (default) — no calibration needed. Wink your **left** eye to scroll up, your **right** eye to scroll down; a *blink* (both eyes together) is ignored, only a one-eyed wink counts. **Wink scroll strength** controls how firm a push each wink gives.
 - **Iris tracking** — watches where your eyes point, via the 9-point calibration described above.
 
@@ -92,6 +100,34 @@ you centered over a long sitting.
 **Presets** let you save a whole setup (speed, band size, everything) per piece — a fast étude
 and a slow ballad can each have their own feel.
 
+## Auto-scroll (time-based)
+
+An alternative to eye/wink tracking — instead of watching your eyes, the page scrolls in time
+with a tempo you set, like a metronome for the page. Switch to it with the **🎵 Tempo** tab in
+the panel (the two are alternatives — starting one automatically pauses the other).
+
+1. **Load your music**, same as above.
+2. **Scroll to your starting point** — wherever in the piece you want playback to begin.
+3. **Set the time signature and tempo** — beats per measure and BPM.
+4. **Analyze score** — Sightline scans the page for *systems* (a system is one line of music —
+   see [Using Sightline](#using-sightline) for scores with multiple staves per line) and
+   estimates how many measures are in each. Detection isn't perfect, especially on dense or
+   unusually-spaced scores — check the **Measures per system** list it produces and fix any
+   count that looks wrong; the schedule uses exactly what's there.
+5. **Start auto-scroll** — the page scrolls and highlights the current system in time, starting
+   from wherever you're scrolled to. **Pause** stops it in place; **Start** again resumes from
+   your current scroll position, so you can nudge things while paused.
+6. **Playback speed** nudges the overall pace up or down (50–150%) without re-entering a new
+   BPM.
+
+**Live tempo correction** (experimental) is a toggle inside this tab. While auto-scroll is
+playing, it listens through your microphone for note attacks and gently nudges the scroll speed
+to track your actual playing tempo — a small, bounded correction, not full tempo-following. It
+shows a live status: *listening* (mic connected, nothing heard yet), *tracking tempo* (actively
+adjusting), or *no signal* (quiet for a while, e.g. during a rest). It's opt-in, off by default,
+and does nothing while paused — expect it to need a bit of trial and error to feel right for
+your instrument and room.
+
 ## Tuning
 
 Every player, webcam, and room is a little different, so a minute with these sliders pays off.
@@ -114,7 +150,7 @@ Webcam eye-tracking isn't laser-precise, but a good setup makes it reliable:
 - **Light your face** evenly (a lamp in front beats a bright window behind you).
 - Put the **camera near eye level** and sit roughly **centered** in its view.
 - Leave **Auto-frame** on — it zooms in on your face automatically so your eyes are well-resolved even if you sit back from the laptop.
-- Use **Check accuracy** (in Setup): it shows you 7 targets and reports how close your gaze lands, whether up/down or sideways is weaker, and your room brightness — with specific fixes. Aim for "you'd land on the right line" being high.
+- Use **Check accuracy** (in the **Eye/Wink** tab): it shows you 7 targets and reports how close your gaze lands, whether up/down or sideways is weaker, and your room brightness — with specific fixes. Aim for "you'd land on the right line" being high.
 - If it drifts mid-piece, tap <kbd>R</kbd> to recenter; if your setup changes (new camera, resized window), it'll suggest a quick recalibration.
 
 ## Troubleshooting
@@ -133,6 +169,14 @@ see whether it grouped the staves correctly.
 
 **It feels inaccurate.** Recalibrate slowly (hold your gaze on each dot), improve lighting, and
 keep *Head-pose comp* on so moving your head doesn't throw it off.
+
+**Auto-scroll's measure counts look wrong.** Detection isn't perfect on dense, unusually-spaced,
+or handwritten scores. Open **Measures per system** after analyzing and correct any counts by
+hand — the schedule uses exactly what's there.
+
+**Live tempo correction won't turn on, or keeps asking for the microphone.** Allow microphone
+access when prompted — same secure-context requirement as the camera (HTTPS or `localhost`). It
+also only does anything while auto-scroll is actually playing; while paused it just waits.
 
 ## Under the hood
 
@@ -161,6 +205,28 @@ For Snap mode, Sightline renders each page and finds the **staff lines** (long h
 strokes), clusters them into staves, then groups staves into systems — accepting the grouping
 only when it's consistent. That's why a four-staff clarinet-quartet score snaps by whole
 system, while a single-staff part snaps line by line.
+</details>
+
+<details>
+<summary>Auto-scroll: measures and scheduling</summary>
+
+Analyzing a score for auto-scroll reuses the same staff-line/system detection as Snap, then
+scans each system's columns for **barlines** (tall vertical strokes) to estimate its measure
+count. Those counts, together with your time signature and BPM, build a simple schedule — how
+long each system should take — that the scroll position and highlight interpolate through
+smoothly.
+</details>
+
+<details>
+<summary>Live tempo correction</summary>
+
+An [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet) analyzes
+microphone input off the main thread for note onsets, using a simple rising-energy detector
+rather than full pitch or beat tracking. Each detected onset is compared to when the schedule
+expected the next beat, and the timing error nudges a small, clamped correction multiplier
+(0.85×–1.15×) rather than re-estimating tempo from scratch — much simpler and more robust, and
+it decays back to neutral whenever playing stops, so a rest or a missed note can never leave a
+stale correction stuck in place.
 </details>
 
 <details>
