@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-xAZzhObx.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BbKotdvq.css">
+  <script type="module" crossorigin src="./assets/index-C68foAWE.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DHUYNEsG.css">
 </head>
 <body>
 
@@ -34,10 +34,12 @@
   <input type="range" id="zm" min="40" max="140" value="100" />
   <div class="ends"><span>smaller — see more</span><span>bigger</span></div>
 
-  <details id="trackingBox" open>
-    <summary>👁 Eye/wink tracking</summary>
-    <div class="sub">Hands-free page turning driven by your webcam — an alternative to Auto-scroll below, not used together with it.</div>
+  <div class="tabBar">
+    <button id="tabTracking" class="tabBtn">👁 Eye/Wink</button>
+    <button id="tabAutoScroll" class="tabBtn">🎵 Tempo</button>
+  </div>
 
+  <div id="trackingPanel" class="tabPanel">
     <label>Tracking type</label>
     <select id="trackingType"></select>
     <button id="camBtn">🎥 Start camera</button>
@@ -108,14 +110,21 @@
       <button id="dotToggle">Toggle gaze dot</button>
       <button id="showSys">Show detected systems</button>
     </details>
-  </details>
+  </div>
 
-  <details id="autoScrollBox">
-    <summary>🎵 Auto-scroll (time-based)</summary>
-    <div class="sub">Scroll to where you want to start, analyze the score, confirm the tempo, then play — the page advances on its own, in time. An alternative to Eye/wink tracking above, not used together with it.</div>
+  <div id="autoScrollPanel" class="tabPanel hidden">
+    <div class="sub">Scroll to where you want to start, analyze the score, confirm the tempo, then play — the page advances on its own, in time.</div>
     <button id="analyzeScoreBtn">🎵 Analyze score</button>
     <div id="autoScrollSummary" class="sub"></div>
     <ul id="autoScrollWarnings"></ul>
+
+    <div id="sectionsBox" class="hidden">
+      <label>Sections detected in this PDF — pick one to focus on</label>
+      <select id="sectionsSelect"></select>
+      <label>Section name <span class="val" id="sectionMeta"></span></label>
+      <input type="text" id="sectionNameInput" />
+      <div id="sectionTimeSigSuggestion"></div>
+    </div>
 
     <label>Time signature — beats per measure <span class="val" id="beatsPerMeasureV"></span></label>
     <input type="range" id="beatsPerMeasure" min="1" max="12" value="4" />
@@ -141,7 +150,7 @@
     <button id="liveTempoToggle">🎤 Live tempo correction (experimental)</button>
     <div class="sub">Listens while you play and gently nudges the schedule toward your actual timing. Only active during playback.</div>
     <div id="liveTempoStatus" class="sub"></div>
-  </details>
+  </div>
 
   <div class="row">
     <button id="saveBtn">💾 Save settings</button>
