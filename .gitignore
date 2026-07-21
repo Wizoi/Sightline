@@ -23,3 +23,7 @@ dist/
 # (runs automatically before dev/build) so they're served same-origin instead
 # of from a third-party CDN at runtime — not checked in, regenerated locally.
 public/mediapipe/
+
+# Tesseract.js OCR worker + core WASM + model, fetched by
+# scripts/fetch-ocr-assets.mjs (same reasoning as above) — not checked in.
+public/tesseract/

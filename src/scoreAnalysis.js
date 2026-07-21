@@ -1,13 +1,15 @@
 import { state } from './appState.js';
+import { setStatus } from './ui.js';
 import { pageSystemsDetailed } from './lib/systemDetection.js';
 import { estimateMeasureCount } from './lib/barlineDetection.js';
 import {
   groupIntoRows, collectKnownNames, findSectionTitle, findTempoMarking,
-  extractMeasureNumbers, refineMeasureCounts, extractTempoMarks,
+  extractMeasureNumbers, refineMeasureCounts, extractTempoMarks, filterMeasureNumberOutliers,
 } from './lib/scoreText.js';
 import { buildSections } from './lib/scoreSections.js';
 import { resolveBpmPerSystem } from './lib/tempoSchedule.js';
 import { detectTimeSignature } from './timeSigDetection.js';
+import { ocrNumberItems, terminateOcr } from './ocr.js';
 
 // Time-signature glyphs are small — at the shared analysis canvas's
 // resolution (tuned for staff-line/barline detection, not fine shape
@@ -73,6 +75,7 @@ export async function analyzeScore() {
   const tempoMarkEntries = []; // { systemIndex (global), bpm } from printed ♩=N marks
   const timeSigByIndex = {}; // global system index -> best-effort {beatsPerMeasure, noteValue, confidence}
   let knownNames = [];
+  let usedOcrAnywhere = false; // any page fell back to OCR -> terminate the worker + note it in the summary
 
   const tmp = document.createElement('canvas');
   const tctx = tmp.getContext('2d', { willReadFrequently: true });
@@ -173,7 +176,33 @@ export async function analyzeScore() {
       const content = await page.getTextContent();
       const pageViewport1x = page.getViewport({ scale: 1 });
       const pdfHeight = pageViewport1x.height;
-      const pageItems = content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
+      let pageItems = content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
+
+      // Image-only PDFs (flattened/scanned exports) carry no text layer, so the
+      // reliable printed-number path finds nothing and every system would fall
+      // all the way back to the over-counting barline estimate. When a page has
+      // detected systems but no numeric text item, OCR the printed measure
+      // numbers off the rendered image instead (src/ocr.js) — lazily loaded and
+      // run only on such pages, so normal notation-software PDFs pay nothing.
+      // OCR emits the same { str, x, y } shape as the text layer, so everything
+      // downstream is identical whether numbers came from text or from OCR.
+      let usedOcr = false;
+      const hasNumberText = pageItems.some((it) => /^\d+$/.test(it.str.trim()));
+      if (!hasNumberText && systemsOnThisPage.length) {
+        setStatus('', `Reading printed measure numbers (page ${pageIdx + 1}/${numPages})…`);
+        const ocrScale = 1500 / pageViewport1x.width; // ~1500px wide: numerals legible; only the left ~1/3 is OCR'd so it stays fast
+        const ocrVp = page.getViewport({ scale: ocrScale });
+        const ocrCanvas = document.createElement('canvas');
+        ocrCanvas.width = Math.round(ocrVp.width);
+        ocrCanvas.height = Math.round(ocrVp.height);
+        const octx = ocrCanvas.getContext('2d', { willReadFrequently: true });
+        octx.fillStyle = '#fff';
+        octx.fillRect(0, 0, ocrCanvas.width, ocrCanvas.height);
+        await page.render({ canvasContext: octx, viewport: ocrVp }).promise;
+        pageItems = await ocrNumberItems(ocrCanvas, pageViewport1x.width, pdfHeight);
+        usedOcr = true;
+        usedOcrAnywhere = true;
+      }
       if (!pageItems.length) continue;
 
       // Convert this page's systems from downsampled-canvas pixel space
@@ -221,10 +250,17 @@ export async function analyzeScore() {
         if (detected) timeSigByIndex[globalIndex] = detected;
       }
 
-      measureNumberEntries.push(...extractMeasureNumbers(pageItems, systemsForText));
+      const pageMeasureEntries = extractMeasureNumbers(pageItems, systemsForText);
+      // OCR can misread a stray digit off the music; keep only the coherent,
+      // strictly-increasing set — applied per page so a multi-part score whose
+      // numbers reset per part isn't mistaken for a break. The clean text layer
+      // is already coherent, so it's used as-is.
+      measureNumberEntries.push(...(usedOcr ? filterMeasureNumberOutliers(pageMeasureEntries) : pageMeasureEntries));
       tempoMarkEntries.push(...extractTempoMarks(pageItems, systemsForText));
-    } catch (e) { /* no text layer on this page — pixel detection above is unaffected */ }
+    } catch (e) { /* no text layer + OCR unavailable/failed — pixel detection above is unaffected */ }
   }
+
+  if (usedOcrAnywhere) await terminateOcr(); // free the OCR worker thread + model
 
   const refinedMeasures = refineMeasureCounts(measuresPerSystem, measureNumberEntries);
 
@@ -283,6 +319,6 @@ export async function analyzeScore() {
 
   return {
     systemCount: systemBands.length, measuresPerSystem: refinedMeasures, warnings,
-    sections: state.autoScroll.sections, tempoSequence,
+    sections: state.autoScroll.sections, tempoSequence, usedOcr: usedOcrAnywhere,
   };
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   TEMPO_WORDS, groupIntoRows, findTempoMarking, collectKnownNames, findSectionTitle, extractMeasureNumbers,
-  refineMeasureCounts, extractTempoMarks,
+  refineMeasureCounts, extractTempoMarks, filterMeasureNumberOutliers,
 } from './scoreText.js';
 
 // item() mimics the simplified {str, x, y} shape scoreAnalysis.js extracts
@@ -324,5 +324,63 @@ describe('refineMeasureCounts', () => {
     const barlineEstimate = [30, 8, 8];
     const entries = [{ systemIndex: 2, measureNumber: 19 }];
     expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([30, 8, 8]);
+  });
+});
+
+describe('filterMeasureNumberOutliers', () => {
+  it('keeps a clean strictly-increasing sequence untouched', () => {
+    const entries = [
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 1, measureNumber: 14 },
+      { systemIndex: 2, measureNumber: 18 },
+    ];
+    expect(filterMeasureNumberOutliers(entries)).toEqual(entries);
+  });
+
+  it('drops a single misread that breaks monotonicity (an OCR slip)', () => {
+    // 18 misread as 2 on system 2 — off the increasing run, so discarded.
+    const entries = [
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 1, measureNumber: 14 },
+      { systemIndex: 2, measureNumber: 2 },
+      { systemIndex: 3, measureNumber: 24 },
+    ];
+    expect(filterMeasureNumberOutliers(entries)).toEqual([
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 1, measureNumber: 14 },
+      { systemIndex: 3, measureNumber: 24 },
+    ]);
+  });
+
+  it('drops a too-high misread as well (keeps the longer coherent run)', () => {
+    const entries = [
+      { systemIndex: 0, measureNumber: 5 },
+      { systemIndex: 1, measureNumber: 88 }, // misread, breaks the run
+      { systemIndex: 2, measureNumber: 10 },
+      { systemIndex: 3, measureNumber: 15 },
+    ];
+    expect(filterMeasureNumberOutliers(entries)).toEqual([
+      { systemIndex: 0, measureNumber: 5 },
+      { systemIndex: 2, measureNumber: 10 },
+      { systemIndex: 3, measureNumber: 15 },
+    ]);
+  });
+
+  it('sorts by systemIndex before evaluating (order-independent)', () => {
+    const entries = [
+      { systemIndex: 2, measureNumber: 18 },
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 1, measureNumber: 14 },
+    ];
+    expect(filterMeasureNumberOutliers(entries)).toEqual([
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 1, measureNumber: 14 },
+      { systemIndex: 2, measureNumber: 18 },
+    ]);
+  });
+
+  it('returns a 0/1-entry list unchanged', () => {
+    expect(filterMeasureNumberOutliers([])).toEqual([]);
+    expect(filterMeasureNumberOutliers([{ systemIndex: 0, measureNumber: 5 }])).toEqual([{ systemIndex: 0, measureNumber: 5 }]);
   });
 });

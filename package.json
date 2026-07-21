@@ -5,9 +5,9 @@
   "description": "Hands-free sheet-music page turner driven by webcam eye tracking.",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/fetch-mediapipe-assets.mjs",
+    "predev": "node scripts/fetch-mediapipe-assets.mjs && node scripts/fetch-ocr-assets.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/fetch-mediapipe-assets.mjs",
+    "prebuild": "node scripts/fetch-mediapipe-assets.mjs && node scripts/fetch-ocr-assets.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.14",
-    "pdfjs-dist": "3.11.174"
+    "pdfjs-dist": "3.11.174",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

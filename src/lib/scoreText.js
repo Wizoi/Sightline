@@ -220,3 +220,35 @@ export function refineMeasureCounts(measuresPerSystem, entries) {
   }
   return refined;
 }
+
+// Drops measure-number entries that don't fit a coherent, strictly-increasing
+// sequence (in systemIndex order) — a probable misread rather than a real
+// number. Real measure numbers only ever climb from one system to the next, so
+// the largest strictly-increasing subsequence is the trustworthy set; anything
+// off it is discarded, and those systems fall back to the barline estimate
+// rather than being "refined" to a wrong exact count. Intended for OCR output
+// (image-only PDFs), where a stray digit can be misrecognized off the music —
+// and applied PER PAGE, never across pages, so a multi-part score whose numbers
+// legitimately reset per part isn't mistaken for a monotonicity break. The
+// clean PDF text layer needs no such filtering. Longest-increasing-subsequence
+// (O(n^2); n = systems-per-page, tiny). entries need not be pre-sorted.
+export function filterMeasureNumberOutliers(entries) {
+  if (entries.length <= 1) return entries.slice();
+  const sorted = [...entries].sort((a, b) => a.systemIndex - b.systemIndex);
+  const n = sorted.length;
+  const len = new Array(n).fill(1);
+  const prev = new Array(n).fill(-1);
+  let bestEnd = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < i; j++) {
+      if (sorted[j].measureNumber < sorted[i].measureNumber && len[j] + 1 > len[i]) {
+        len[i] = len[j] + 1;
+        prev[i] = j;
+      }
+    }
+    if (len[i] > len[bestEnd]) bestEnd = i;
+  }
+  const keep = new Set();
+  for (let k = bestEnd; k !== -1; k = prev[k]) keep.add(k);
+  return sorted.filter((_, i) => keep.has(i));
+}

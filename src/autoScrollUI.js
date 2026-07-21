@@ -110,9 +110,13 @@ function refreshTempoLabel() {
 }
 
 function renderSummary(result) {
-  $('autoScrollSummary').textContent = result.systemCount
-    ? `Found ${result.systemCount} systems.`
-    : 'No systems found.';
+  const base = result.systemCount ? `Found ${result.systemCount} systems.` : 'No systems found.';
+  // This PDF had no text layer, so measure numbers were read from the page
+  // image (OCR). Say so — reads are usually reliable but worth a glance, and the
+  // measures list below stays editable if any need correcting.
+  $('autoScrollSummary').textContent = result.usedOcr
+    ? `${base} No embedded text — measure numbers read from the page image; check the list if any look off.`
+    : base;
 
   // Printed tempo changes (♩=N marks) are applied automatically; show them so
   // it's clear the piece won't run at one flat tempo, and that the manual
