@@ -10,7 +10,7 @@ import { runWinkCalibration, beginWinkCalibrationSequence } from './winkCalibrat
 import { startFollowLoop, setFollowing } from './followController.js';
 import { initSettingsUI, loadSettings } from './settings.js';
 import { initAutoScrollUI, pauseAutoScrollUI } from './autoScrollUI.js';
-import { startAutoScrollLoop } from './autoScrollController.js';
+import { startAutoScrollLoop, repositionAutoScroll } from './autoScrollController.js';
 import { initTabsUI } from './tabsUI.js';
 
 initSettingsUI();
@@ -75,7 +75,9 @@ function toggleMin() {
   document.documentElement.style.setProperty('--pane', min ? '46px' : '320px');
   $('minBtn').textContent = min ? '»' : '«';
   $('minBtn').title = (min ? 'Expand panel' : 'Collapse panel') + ' (M)';
-  if (state.pdfDoc) renderAll();     // reflow the music to the new width
+  // Reflow the music to the new width, then re-snap auto-scroll to the
+  // reflowed page (systemBands are page-relative, so no re-analyze needed).
+  if (state.pdfDoc) renderAll().then(repositionAutoScroll);
 }
 $('minBtn').onclick = toggleMin;
 
@@ -97,17 +99,24 @@ window.addEventListener('keydown', (e) => {
 // intermediate event — renderAll() itself is also safe to call repeatedly
 // (see its generation-counter guard), but there's no reason to re-render
 // every PDF page several times a second while the window is mid-drag.
+// Bound to both `resize` and `orientationchange` so a phone rotated in any
+// direction reflows the same way a browser resize does. After the reflow,
+// auto-scroll is re-snapped to the new layout (page-relative systemBands, so
+// no re-analyze) — this is what keeps the reading line/highlight correct
+// across rotations, window resizes, and sidebar collapse while paused.
 let resizeTimer;
-window.addEventListener('resize', () => {
+function scheduleReflow() {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => {
-    if (state.pdfDoc) renderAll();
+  resizeTimer = setTimeout(async () => {
+    if (state.pdfDoc) { await renderAll(); repositionAutoScroll(); }
     if (state.calibrated && state.calibFp) {
       const reasons = calibMismatch(state.calibFp, currentFingerprint());
       if (reasons.length) showRecalBanner(reasons);
     }
   }, 400);
-});
+}
+window.addEventListener('resize', scheduleReflow);
+window.addEventListener('orientationchange', scheduleReflow);
 
 /* ---------------------------------------------------------------------- *
  *  Boot

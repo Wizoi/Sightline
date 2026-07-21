@@ -5,6 +5,16 @@
 export const cfg = {
   deadZoneFrac: 0.18, bandPos: 0.5, rightZoneFrac: 0.62,
   maxSpeed: 360, smoothWin: 12, holdMs: 350, sheetMargin: 0.06, zoom: 1.0,
+
+  // Where the currently-playing system sits on screen during auto-scroll, as a
+  // fraction of the viewport height (0 = top edge, 1 = bottom). Deliberately
+  // lower than the eye-tracking band's `bandPos` (0.5): parking the reading
+  // line ~60% down leaves ~1.5 lines of already-played context visible above
+  // it, so when a new line scrolls into place the reader still sees where they
+  // came from rather than the line jumping to the top edge. Separate from
+  // `bandPos` because that one also drives the eye/wink reading band and
+  // calibration target, which should stay centered.
+  autoScrollBandPos: 0.6,
 };
 
 export const state = {
@@ -66,7 +76,7 @@ export const state = {
   // above; see src/scoreAnalysis.js and src/autoScrollController.js.
   autoScroll: {
     analyzed: false,             // has "Analyze score" run for the current PDF?
-    systemBands: [],             // [{ center, rowMin, rowMax }] per system, doc px — from scoreAnalysis
+    systemBands: [],             // [{ page, fracCenter, fracMin, fracMax }] per system — page-relative, from scoreAnalysis; resolved to doc px at use time via systemGeometry.js so they survive resize/zoom/rotation
     measuresPerSystem: [],       // editable estimate, one entry per system
     beatsPerMeasure: 4,
     bpm: 100,

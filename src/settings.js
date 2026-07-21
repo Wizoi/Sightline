@@ -2,6 +2,7 @@ import { cfg, state } from './appState.js';
 import { $, gazeEl, toast, applyBand, setStatus } from './ui.js';
 import { detectSystems, renderSysMarks } from './systemDetection.js';
 import { renderAll } from './pdf.js';
+import { repositionAutoScroll } from './autoScrollController.js';
 import { setCameraZoom } from './camera.js';
 import { TRACKING_TYPES, getActiveTracking, setTrackingType, canFollow } from './tracking/index.js';
 import { resetWinkTrackingState } from './tracking/winkTracking.js';
@@ -147,7 +148,7 @@ export function initSettingsUI() {
   bind('mg', 'sheetMargin', (v) => v + '%', (v) => v / 100);
   bind('zm', 'zoom', (v) => v + '%', (v) => v / 100);
   ['dz', 'bp', 'rt'].forEach((id) => $(id).addEventListener('input', applyBand));
-  $('zm').addEventListener('change', () => { if (state.pdfDoc) renderAll(); });
+  $('zm').addEventListener('change', () => { if (state.pdfDoc) renderAll().then(repositionAutoScroll); });
 
   $('saveBtn').onclick = saveSettings;
   $('defBtn').onclick = resetDefaults;

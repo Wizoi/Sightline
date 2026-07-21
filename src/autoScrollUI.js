@@ -3,6 +3,7 @@ import { $, toast, setStatus, syncAutoScrollButton } from './ui.js';
 import { analyzeScore } from './scoreAnalysis.js';
 import { startAutoScroll, pauseAutoScroll, stopAutoScroll, currentTempoLabel, rebuildScheduleLive } from './autoScrollController.js';
 import { startLiveTempo, stopLiveTempo } from './liveTempo.js';
+import { resolveBand, scoreCanvases } from './systemGeometry.js';
 import { setFollowing } from './followController.js';
 
 export function initAutoScrollUI() {
@@ -158,7 +159,10 @@ function selectSection(idx) {
   renderMeasuresList();
 
   const first = sec.systemBands[0];
-  if (first) window.scrollTo(0, Math.max(0, first.center - window.innerHeight / 2));
+  if (first) {
+    const g = resolveBand(first, scoreCanvases());
+    if (g) window.scrollTo(0, Math.max(0, g.center - window.innerHeight / 2));
+  }
 }
 
 function renderSectionsList() {

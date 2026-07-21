@@ -14,6 +14,13 @@ export async function loadPdf(arrayBuffer) {
     toast('Could not open that PDF: ' + err.message);
     return;
   }
+  // A genuinely new document invalidates any prior auto-scroll analysis —
+  // different pages, different system count, different measure counts — so
+  // clear it before rendering. This is the ONE place analysis resets: a plain
+  // re-render of the same document (resize / zoom / rotation / sidebar
+  // collapse) deliberately does not, because systemBands are page-relative and
+  // reflow-stable (see systemGeometry.js).
+  resetAutoScrollAnalysis();
   await renderAll();
   emptyEl.style.display = 'none';
   $('runBtn').disabled = !canFollow();
@@ -51,21 +58,27 @@ export async function renderAll() {
   }
   if (myGen !== renderGeneration) return;
   detectSystems();
+  // No auto-scroll invalidation here: systemBands are page-relative (see
+  // systemGeometry.js), so this reflow — whatever triggered it — is picked up
+  // automatically the next time the position is applied. Snap mode's own
+  // detection is re-run above via detectSystems().
+}
 
-  // A re-render means the page layout just changed (resize, zoom, panel
-  // collapse) — auto-scroll's systemBands/highlight coordinates were
-  // captured as absolute document pixels at Analyze time and are now stale.
-  // Snap mode re-detects on every renderAll() automatically; auto-scroll
-  // doesn't, so it needs an explicit invalidation rather than silently
-  // scrolling/highlighting the wrong place next time it's started.
-  if (state.autoScroll.analyzed) {
-    state.autoScroll.analyzed = false;
-    // Uses the shared sync helper, not a blind disable: if auto-scroll is
-    // actively playing right now, this button is the only way to pause it,
-    // and must stay enabled/labeled "Pause" -- see ui.js's
-    // syncAutoScrollButton() for why analyzed=false alone doesn't disable it
-    // while playing.
-    syncAutoScrollButton();
-    toast('Score layout changed — re-analyze for auto-scroll before starting.');
-  }
+// Clears auto-scroll analysis + playback back to its pre-Analyze state. Called
+// only from loadPdf() (a new document). Kept here rather than importing
+// stopAutoScroll() from the controller to avoid pulling the whole playback
+// module — and its ui.js chain — into the PDF loader for a plain field reset.
+function resetAutoScrollAnalysis() {
+  const as = state.autoScroll;
+  as.playing = false;
+  as.schedule = null;
+  as.scheduleElapsed = 0;
+  as.analyzed = false;
+  as.systemBands = [];
+  as.measuresPerSystem = [];
+  as.sections = [];
+  as.activeSectionIndex = 0;
+  const hl = $('autoScrollHighlight');
+  if (hl) hl.style.display = 'none';
+  syncAutoScrollButton();
 }

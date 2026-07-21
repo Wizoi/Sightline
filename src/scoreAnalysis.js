@@ -79,8 +79,6 @@ export async function analyzeScore() {
   const canvases = Array.from(scoreEl.querySelectorAll('canvas'));
   for (let pageIdx = 0; pageIdx < canvases.length; pageIdx++) {
     const cv = canvases[pageIdx];
-    const rect = cv.getBoundingClientRect();
-    const docTop = rect.top + window.scrollY, docH = rect.height;
     const ah = 1200, aw = Math.max(60, Math.round(ah * cv.width / cv.height));
     tmp.width = aw; tmp.height = ah;
     tctx.drawImage(cv, 0, 0, aw, ah);
@@ -122,10 +120,16 @@ export async function analyzeScore() {
         columnRunLengths[c] = best;
       }
       const globalIndex = systemBands.length;
+      // Stored page-relative (page index + fractions of the page's height),
+      // NOT as absolute document pixels: any later reflow (resize, zoom,
+      // rotation, sidebar collapse) moves docTop/docH, so baking them in here
+      // would go stale silently. systemGeometry.js re-projects these onto the
+      // live canvas geometry at scroll/highlight time instead.
       systemBands.push({
-        center: docTop + (sys.center / ah) * docH,
-        rowMin: docTop + (sys.rowMin / ah) * docH,
-        rowMax: docTop + (sys.rowMax / ah) * docH,
+        page: pageIdx,
+        fracCenter: sys.center / ah,
+        fracMin: sys.rowMin / ah,
+        fracMax: sys.rowMax / ah,
       });
       measuresPerSystem.push(estimateMeasureCount(columnRunLengths, bandHeight));
       systemsOnThisPage.push({ index: globalIndex, rowMin, rowMax });

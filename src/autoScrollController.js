@@ -2,6 +2,7 @@ import { cfg, state } from './appState.js';
 import { $, toast, setStatus, applyBand, syncAutoScrollButton } from './ui.js';
 import { buildSchedule, progressWithinSystem, nearestSystemIndex } from './lib/tempoSchedule.js';
 import { decayIfQuiet, correctionStatus } from './lib/tempoCorrection.js';
+import { resolveBand, scoreCanvases } from './systemGeometry.js';
 
 const LIVE_STATUS_LABEL = {
   off: '',
@@ -27,8 +28,10 @@ export function startAutoScroll() {
   });
 
   // Start from whichever system is nearest wherever the user has already
-  // scrolled to — "scroll to the starting group, then hit go."
-  const centers = as.systemBands.map((b) => b.center);
+  // scrolled to — "scroll to the starting group, then hit go." Bands are
+  // page-relative, so resolve them against the current layout first.
+  const canvases = scoreCanvases();
+  const centers = as.systemBands.map((b) => { const g = resolveBand(b, canvases); return g ? g.center : 0; });
   const viewportCenterDoc = window.scrollY + window.innerHeight / 2;
   const startIdx = nearestSystemIndex(centers, viewportCenterDoc);
   as.scheduleElapsed = as.schedule.systems[startIdx] ? as.schedule.systems[startIdx].start : 0;
@@ -95,6 +98,51 @@ export function currentTempoLabel() {
   return Math.round(as.bpm * as.tempoPct * correction) + ' bpm';
 }
 
+// Resolves the current schedule position to a scroll target + highlight
+// rectangle and applies both. Reads systemBands' page-relative fractions
+// against the *live* canvas geometry every call (see systemGeometry.js), so a
+// window resize, phone rotation, zoom change, or sidebar collapse is picked up
+// automatically — the next tick (while playing) or an explicit
+// repositionAutoScroll() (while paused) re-projects onto the new layout with
+// no re-analysis. Returns the system index shown, or -1 if there's nothing to
+// show yet (no schedule, or the page canvas isn't rendered).
+function applyScrollPosition() {
+  const as = state.autoScroll;
+  if (!as.schedule) return -1;
+  const { index, progress } = progressWithinSystem(as.schedule, as.scheduleElapsed);
+  if (index < 0) return -1;
+
+  const canvases = scoreCanvases();
+  const cur = resolveBand(as.systemBands[index], canvases);
+  if (!cur) return -1;
+  const nextBand = as.systemBands[index + 1];
+  const next = nextBand ? resolveBand(nextBand, canvases) : null;
+
+  const targetDocY = next ? cur.center + (next.center - cur.center) * progress : cur.center;
+  const docMax = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  const targetY = Math.min(docMax, Math.max(0, targetDocY - window.innerHeight * cfg.autoScrollBandPos));
+  window.scrollTo(0, targetY);
+
+  const el = $('autoScrollHighlight');
+  if (el) {
+    el.style.display = 'block';
+    el.style.top = cur.rowMin + 'px';
+    el.style.height = Math.max(4, cur.rowMax - cur.rowMin) + 'px';
+  }
+  return index;
+}
+
+// Re-applies the current scroll target + highlight after a layout change
+// (resize / rotation / zoom / sidebar collapse). While playing, tick()'s rAF
+// loop already does this every frame; this is for the *paused* case, where the
+// highlight would otherwise freeze at the old pixel position until playback
+// resumes. No-op if nothing has been started. Called from pdf.js/main.js after
+// a re-render settles.
+export function repositionAutoScroll() {
+  if (!state.autoScroll.schedule) return;
+  applyScrollPosition();
+}
+
 function tick(now) {
   requestAnimationFrame(tick);
   const dt = lastFrame ? (now - lastFrame) / 1000 : 0;
@@ -124,23 +172,9 @@ function tick(now) {
     syncAutoScrollButton();
   }
 
-  const { index, progress } = progressWithinSystem(as.schedule, as.scheduleElapsed);
-  if (index >= 0) {
-    const bands = as.systemBands;
-    const cur = bands[index];
-    const next = bands[index + 1];
-    const targetDocY = next ? cur.center + (next.center - cur.center) * progress : cur.center;
-    const docMax = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    const targetY = Math.min(docMax, Math.max(0, targetDocY - window.innerHeight * cfg.bandPos));
-    window.scrollTo(0, targetY);
-
-    const el = $('autoScrollHighlight');
-    if (el) {
-      el.style.display = 'block';
-      el.style.top = cur.rowMin + 'px';
-      el.style.height = Math.max(4, cur.rowMax - cur.rowMin) + 'px';
-    }
-    setStatus('s-good', `auto-scrolling — system ${index + 1}/${bands.length}`);
+  const shownIndex = applyScrollPosition();
+  if (shownIndex >= 0) {
+    setStatus('s-good', `auto-scrolling — system ${shownIndex + 1}/${as.systemBands.length}`);
   }
 
   const tempoEl = $('tempoText');
