@@ -527,8 +527,31 @@ timing correction.
   tuned toward monophonic band instruments (the primary audience); untested against chordal
   playing.
 - Whether onset detection could also drive **wink/gaze-independent** page turns (i.e., a third
-  hands-free mode driven purely by listening) — not attempted; would need much more robust
-  beat-position tracking than the current "nudge a known schedule" approach provides.
+  hands-free mode driven purely by listening) — **resolved as a scoping question, not just a
+  robustness one (2026-07-20, "play-along auto-scroll" feature strategy review, see Persona 9):**
+  the blocker isn't beat-tracking robustness alone, it's that *deriving position from audio alone*
+  needs a symbolic pitch/rhythm reference to align onsets against, and getting that reference from
+  the PDF (scanned or engraved) is the already-ruled-infeasible full-OMR problem (Persona 3) one
+  layer upstream of any audio algorithm. What onset detection *can* still do without that
+  reference: (a) correct an already-trusted time-based schedule (shipped, this persona's core
+  technique) and (b) detect *silence* (already-computed via `decayIfQuiet`'s energy tracking) to
+  auto-pause playback when the performer visibly stops, and/or measure a live count-in to set BPM
+  automatically instead of the student typing a number — both candidate v2 work, not yet built; see
+  Persona 9's verdict write-up for the concrete next spike.
+- **Candidate v2, not yet built — silence-triggered auto-pause.** Currently `decayIfQuiet` only
+  relaxes the tempo-nudge correction back to neutral (1.0×) when the performer goes quiet; the
+  schedule itself keeps advancing and scrolling. A student who stops mid-passage to fix a mistake
+  gets left behind by their own page. Since `state.autoScroll.bpm`/`beatsPerMeasure` are already
+  known, a safe threshold (e.g. silence longer than ~1.5-2× one full measure's worth of beats) can
+  be computed from data already in state, with no new detection needed — just needs validating
+  against a few real recordings of an actual band part played with intentional stops, to confirm
+  ordinary written rests in real single-tempo band parts don't false-trigger it.
+- **Candidate v2, not yet built — count-in tempo calibration.** Instead of the student typing a
+  BPM guess before Start, have them play a few beats/the first phrase; the existing onset detector
+  measures real inter-onset intervals and derives BPM automatically, then hands off to the same
+  one-global-BPM schedule model unchanged. Reuses existing infrastructure end to end (no new
+  detection algorithm); the natural "just start playing" gesture also fits the play-along scenario
+  better than a numeric-entry field.
 
 ---
 
@@ -719,6 +742,55 @@ our real users actually read music" check.
   still be a first-impression-breaking bug** — effort size and user impact are independent axes;
   don't let one substitute for triaging the other.
 
+**Practice is not performance, and that distinction breaks a naive "play-along auto-scroll"
+proposal (2026-07-20 review of that feature idea).** Auto-scroll's existing model (single BPM,
+monotonic time-based schedule, gentle onset-nudge correction — see Audio DSP and Real-Time Control
+personas) was built and validated for **playing a piece through start to finish at one tempo** —
+a performance-shaped scenario. Real solo practice is not that: a band student **stops and repeats
+a hard measure over and over, plays a passage slow then speeds it up, pauses to breathe/reset,
+sometimes runs a metronome, counts multi-bar rests silently (no sound at all for many beats), and
+— especially as a beginner — plays wrong notes and has unstable pitch/tone constantly.** Any
+scroll-driver proposed for this scenario has to survive all of those, not just the clean
+run-through case the current schedule already handles.
+- **Audio score-following (listening to position the page, not just nudge a known schedule's
+  tempo) is judged NOT worth building for v1**, for a reason specific to this audience's rests:
+  the app has no reliable way to know *where the written rests are* (full OMR — reading actual
+  note/rest values from pixels — was already researched and found infeasible client-side, see OMR
+  persona) so nothing in the codebase can distinguish "the student is silently counting 8 bars of
+  rest, as written" from "the student stopped to fix a reed problem." A follower that advances
+  the page during a genuine written rest, or one that pauses/stalls waiting for sound that was
+  never supposed to come, is a **dealbreaker for trust** — worse than doing nothing, because it
+  actively fights a student's silent counting instead of just failing to help. Stop-and-repeat
+  practice compounds this: the existing onset-nudge correction (Audio DSP persona) only ever nudges
+  a schedule *forward* within a small clamped range — it has no concept of the position jumping
+  *backward* when a student repeats a measure, so even a simplified "are they still playing"
+  activity gate would misbehave the first time a student loops a hard passage.
+- **What actually earns trust here is predictability the student can rely on, not cleverness that's
+  occasionally wrong** — the same lesson as the control-panel clarity findings above, applied to
+  the scroll mechanism itself: a dumb, metronome-locked scroll a student can predict and fight
+  through once is more usable than a smart listener that's right 90% of the time but silently wrong
+  in exactly the moments (a long rest, a repeat) that already require the student's full attention.
+  A real band director's practical advice to students ("count your rests, don't just wait for a
+  cue") already assumes the student is the one tracking position during a rest — a feature that
+  tries to do that *for* them, imperfectly, undermines a habit teachers are actively trying to
+  build, not just a UX nuisance.
+- **Recommendation for v1: keep auto-scroll's existing metronome-locked mode for run-throughs
+  (already validated for exactly that use case), and add a distinct, fully hands-free
+  *manual advance* mode for drill/repeat practice** — reusing the existing wink/gaze trigger
+  infrastructure to let the student themselves decide when to move to the next system/measure (or
+  back up to repeat one), at their own pace, with no listening involved at all. This puts the
+  human — who already knows when they're ready to move on — in control of the "clock," which is
+  the actual mental model of how practice works, rather than trying to infer it from an inherently
+  ambiguous audio signal.
+- **The one question that would validate or kill audio-following as a future direction:** record a
+  real student's *practice* session (not a clean performance) — stopping, repeating, playing a
+  passage slow then fast, counting a real multi-bar rest — and run it through the existing onset
+  detector + schedule-nudge logic. If it produces more false pauses/false advances than correct
+  nudges on that recording, audio-following isn't ready for a practice-shaped feature regardless of
+  how well it performs on a clean run-through; this hasn't been tested and would need a real
+  recording, not synthetic input, to answer honestly (the same "verify against real data" discipline
+  as the OMR persona's barline/measure-number fixes).
+
 **Open questions / future research:**
 - No current handling for **duet/ensemble parts with cues** (small cue notes from another
   instrument) — unclear how they'd interact with barline-based measure counting; likely fine
@@ -726,6 +798,11 @@ our real users actually read music" check.
 - Orchestral/piano users are explicitly a secondary audience, not unsupported — worth periodically
   checking that secondary-audience support hasn't silently regressed rather than actively
   investing in it.
+- Whether a lightweight, non-OMR way to flag "this system contains a long rest" (e.g. detecting a
+  whole-rest glyph via the same shape-matching approach used for time-signature digits) could ever
+  make a silence-tolerant audio mode safe — not attempted; would need to clear the same
+  confidence-gated "ships inert unless confident" bar as the time-signature matcher before being
+  trusted anywhere near a live practice session.
 
 ---
 
@@ -775,6 +852,41 @@ assets — see below.
   documented tradeoff's numbers should be treated as a claim to verify, not a fact to cite
   indefinitely** — this one sat unverified long enough for the actual asset sizes to never once
   have been checked against the real, small numbers.
+
+- **Play-along audio score-following (mic-driven auto-scroll for a soloist) — reviewed 2026-07-20,
+  verdict: no hard blocker, but three gaps in the existing posture, not zero-cost to ship:**
+  - **The mic isn't explicitly covered by the privacy posture yet.** `liveTempo.js` already does
+    `getUserMedia({ audio: true, ... })` for onset-based tempo correction (see Audio DSP persona),
+    but the README's privacy section and this persona's own framing talk about "camera frame" far
+    more prominently than audio — an implicit "audio inherits the same treatment as video" has
+    never been written down. A *new*, more ambitious mic feature (driving scroll position, not
+    just nudging a known schedule) is exactly the moment to make that explicit rather than let it
+    stay implied.
+  - **Any new pitch/onset ML model must follow the MediaPipe self-hosting precedent**, not the
+    CDN-fetch pattern that precedent replaced: fetched at build/dev time from the installed npm
+    package or a pinned stable URL (a `scripts/fetch-*-assets.mjs`-style script), served
+    same-origin under `public/`, git-ignored, regenerable — not a runtime fetch from a third-party
+    CDN a school network might block, and not assumed "too large to self-host" without actually
+    checking its size the way the MediaPipe number was checked.
+  - **The single most tempting phone-home vector here is accuracy-improvement telemetry** —
+    "send a short clip/anonymized features to help us tune the detector" is a realistic ask for
+    whoever builds the pitch/onset model, and must be preempted explicitly (no such call in the
+    code, and ideally a smoke-test assertion that no network request fires while the mic is
+    active), not just avoided by omission.
+  - **Mic permission UX should mirror the camera's existing plain-language, at-point-of-use ask**,
+    plus a one-line "analyzed on this device, never transmitted" affordance right at the permission
+    prompt — this is also the fastest thing a school IT approver needs to see, not something to
+    leave buried in a README.
+  - **Holding a decoded PDF and a live mic buffer in memory at once is not a new privacy risk** —
+    both are already in-process/in-memory-only with nothing written to disk; the only thing worth
+    guarding against is a future engineer accidentally routing a raw audio buffer into
+    localStorage (only settings belong there, per the existing corollary above).
+  - Whether audio-based position-in-score estimation (matching played pitches/onsets to a known
+    note sequence via something DTW-like) is even *feasible* client-side — as opposed to the
+    existing "nudge a known schedule" onset correction — is the Audio DSP/OMR personas' call, not
+    this persona's; note only that it would face the same "must recover actual note identity from
+    something" problem that already made full pixel-based OMR infeasible, if the design ever needs
+    to know *which* notes were played, not just *that* a note started.
 
 **When to invoke:** early — at the *idea* stage of any feature that touches camera frames,
 microphone audio, or the loaded PDF, before design work goes further. Cheaper to redirect a
@@ -906,6 +1018,21 @@ established.
   reach regardless of software effort absent that specific hardware condition. A separate, real
   next step exists on the *RGB* side (spike `webeyetrack`, an existing MIT-licensed browser gaze
   library) if accuracy improvement is still wanted. (Persona 1)
+- **Audio score-following** (listening to the performer and deriving playback *position* from what
+  they're actually playing, rather than nudging a pre-built schedule): **infeasible client-side —
+  not a new investigation, a direct corollary of the existing full-OMR verdict above.** Score-
+  following needs a symbolic pitch/onset reference sequence to align the live audio against; the
+  only place that reference could come from is the loaded PDF, and extracting it (scanned *or*
+  cleanly engraved) from pixels *is* the full-OMR problem already ruled out for staying 100%
+  client-side (Persona 3) — this app has no MusicXML/MIDI side-channel, only the PDF. Reviewed
+  2026-07-20 for the "play-along auto-scroll for a practicing band student" feature ask; killed by
+  checking the OMR verdict + the Privacy persona's no-cloud constraint *before* spending any spike
+  effort, exactly the cheap-filters-first sequencing this persona is supposed to apply. What
+  *does* remain feasible and valuable, using the exact same onset-detection machinery already
+  shipped: audio that only **corrects or gates a time-based clock that's already trusted**
+  (shipped: the onset-nudge tempo trim) rather than deriving position from scratch — see Persona
+  4's silence-auto-pause and count-in-calibration candidates for the concrete next v2 steps in that
+  direction, both of which need no new signal, only new uses of data already collected.
 
 **Cross-cutting triage of the 2026-07-19 Fable review** (see
 [`docs/reviews/2026-07-19-fable-review.md`](reviews/2026-07-19-fable-review.md); A1/C1 already
@@ -1011,6 +1138,14 @@ If both check out, this is a scope refinement of the existing verdict (the const
 should be measured, not assumed, before the Low-effort estimate is trusted.
 
 **Open questions worth spiking next** (candidate backlog, not commitments):
+- **Play-along auto-scroll v2 (2026-07-20 feature review):** silence-triggered auto-pause and
+  count-in tempo calibration (both spelled out under Persona 4's open questions) — the two
+  concrete, low-risk next increments once real audio score-following was ruled out by corollary
+  above. Suggested single spike to run first: feed a few real recordings of an actual band part
+  played with intentional mid-passage stops through the existing onset detector, and confirm a
+  silence threshold derived from the schedule's own beat length (~1.5-2x one measure) doesn't
+  false-trigger on ordinary written rests — cheap (no new detector), and the one piece of this
+  bundle that's a genuine empirical unknown rather than a corollary of an existing verdict.
 - In-browser lightweight ML for rhythm extraction (would revisit the OMR verdict — see Privacy
   persona's open question).
 - Repeat signs / D.S. al Fine handling in auto-scroll's schedule (currently unhandled — see
