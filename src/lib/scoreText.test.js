@@ -283,13 +283,47 @@ describe('refineMeasureCounts', () => {
     expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([4, 3, 3, 3]);
   });
 
-  it('leaves systems untouched when their neighbor is not directly adjacent (a gap)', () => {
+  it('distributes the known total across a gap of un-numbered systems', () => {
+    // Systems 0 and 1 are bracketed by 26 and 33 -> 7 measures across 2 systems.
+    // System 1's own number wasn't found, but the total is still authoritative,
+    // so it's shared out (proportionally, equal barline weights -> 4 + 3) rather
+    // than left on the raw estimate.
     const barlineEstimate = [3, 3, 3];
     const entries = [
       { systemIndex: 0, measureNumber: 26 },
-      { systemIndex: 2, measureNumber: 33 }, // system 1's number wasn't found -- a gap
+      { systemIndex: 2, measureNumber: 33 },
     ];
-    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([3, 3, 3]);
+    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([4, 3, 3]);
+  });
+
+  it('splits a gap evenly regardless of the (untrusted) barline estimate', () => {
+    // 11 measures across 2 systems -> [6,5], ignoring the noisy barline
+    // ([12,10]); the last system, past the final number, keeps its estimate.
+    const barlineEstimate = [12, 10, 99];
+    const entries = [
+      { systemIndex: 0, measureNumber: 40 },
+      { systemIndex: 2, measureNumber: 51 },
+    ];
+    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([6, 5, 99]);
+  });
+
+  it('gives every system in a gap at least one measure', () => {
+    const barlineEstimate = [0, 0, 0, 9];
+    const entries = [
+      { systemIndex: 0, measureNumber: 10 },
+      { systemIndex: 3, measureNumber: 13 }, // 3 measures across 3 systems -> 1 each
+    ];
+    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([1, 1, 1, 9]);
+  });
+
+  it('leaves a gap on the barline estimate when the total cannot cover one each', () => {
+    // 2 measures claimed across 3 systems is implausible (a misread) -> untouched.
+    const barlineEstimate = [4, 4, 4];
+    const entries = [
+      { systemIndex: 0, measureNumber: 10 },
+      { systemIndex: 3, measureNumber: 12 },
+    ];
+    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([4, 4, 4]);
   });
 
   it('ignores a non-positive delta (defensive against a misread number)', () => {
@@ -319,11 +353,13 @@ describe('refineMeasureCounts', () => {
     expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([4, 9]);
   });
 
-  it('cannot anchor the first system when the next numbered system is not adjacent', () => {
-    // First two systems both unnumbered; first printed number is on system 3.
+  it('distributes across the leading gap when the first printed number is not on system 1', () => {
+    // Systems 0,1 unnumbered; first printed number "19" is on system 2. With the
+    // implicit measure-1 anchor that's 18 measures across systems 0,1 -> [9,9]
+    // (even), instead of both staying on the raw estimate.
     const barlineEstimate = [30, 8, 8];
     const entries = [{ systemIndex: 2, measureNumber: 19 }];
-    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([30, 8, 8]);
+    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([9, 9, 8]);
   });
 });
 

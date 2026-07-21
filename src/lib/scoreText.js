@@ -190,33 +190,59 @@ export function extractTempoMarks(pageItems, systemsOnPage, { pad = 24 } = {}) {
   return results;
 }
 
-// Refines the pixel/barline-based measuresPerSystem estimate using real
-// printed measure numbers, wherever two *directly adjacent* systems both
-// have a known number (their difference is exact). Everywhere else --
-// gaps, a section's last system, pages without printed numbers -- the
-// original barline-count estimate is left untouched rather than guessed at.
-// entries must be sorted by systemIndex ascending (extractMeasureNumbers'
-// per-page output, concatenated in page order, already satisfies this).
+// Splits `total` measures as evenly as possible across `span` systems whose own
+// numbers are missing but which are bracketed by two known ones (largest-
+// remainder rounding, so the parts sum to exactly `total`, each >= 1, the
+// bigger ones first). Deliberately even, not weighted by the barline estimate:
+// inside a gap that estimate is the very signal we don't trust (a system's
+// number was missing precisely because reading failed there, and barline can be
+// noisy or even anti-correlated with the true count on dense music — validated
+// on a real image-only lead sheet, where even splitting recovered the true
+// counts and barline-weighted splitting did not). What matters for scroll
+// timing is that the total is pinned exactly at both ends; the split within a
+// short gap is minor and self-corrects at the next known number. Returns null
+// when `total` can't cover one measure each — implausible, so the caller leaves
+// the barline estimate.
+function distributeMeasures(total, span) {
+  if (total < span) return null;
+  const base = Math.floor(total / span);
+  let extra = total - base * span; // the leftover, spread one-each over the first `extra`
+  const out = [];
+  for (let i = 0; i < span; i++) out.push(base + (extra-- > 0 ? 1 : 0));
+  return out;
+}
+
+// Refines the pixel/barline-based measuresPerSystem estimate using real printed
+// measure numbers. Between every pair of consecutive known numbers the exact
+// total measures is known: if they sit on directly adjacent systems that total
+// IS that system's count (exact); if a gap of systems whose own numbers weren't
+// found sits between them, the total is distributed across that gap
+// (distributeMeasures) rather than dropping those systems back to the raw
+// barline estimate — the numbers are still the authority, just shared out.
+// Systems past the last known number (or before the first, absent the anchor
+// below) keep their barline estimate. entries need not be pre-sorted.
 export function refineMeasureCounts(measuresPerSystem, entries) {
   const refined = [...measuresPerSystem];
   // The very first system always begins at measure 1, even though engravers
   // almost never print a "1" over it. Without this implicit anchor the first
-  // system has no left-hand number to diff against the next numbered system,
-  // so it can't be refined and stays stuck on the raw pixel/barline estimate
-  // -- which is exactly the count most likely to be wrong on a sparse opening
-  // full of rests, the clef, time signature and tempo text (a real "30
-  // measures instead of 11" miss). Anchoring measure 1 lets the reliable
-  // printed number on the next numbered system fix it: e.g. "12" -> 12-1 = 11.
-  // Skipped when the first system genuinely carries a printed number already
-  // (no duplicate) or when nothing was numbered at all (nothing to diff).
-  const anchored = entries.length && entries[0].systemIndex !== 0
-    ? [{ systemIndex: 0, measureNumber: 1 }, ...entries]
-    : entries;
+  // system(s) have no left-hand number to diff against and stay stuck on the
+  // raw barline estimate -- exactly the count most likely to be wrong on a
+  // sparse opening full of rests, the clef, time signature and tempo text (a
+  // real "30 measures instead of 11" miss). Anchoring measure 1 lets the next
+  // known number fix it: "12" -> 12-1 = 11. Skipped when the first system
+  // already carries a printed number, or nothing was numbered at all.
+  const sorted = [...entries].sort((a, b) => a.systemIndex - b.systemIndex);
+  const anchored = sorted.length && sorted[0].systemIndex !== 0
+    ? [{ systemIndex: 0, measureNumber: 1 }, ...sorted]
+    : sorted;
   for (let k = 0; k < anchored.length - 1; k++) {
     const cur = anchored[k], next = anchored[k + 1];
-    if (next.systemIndex - cur.systemIndex !== 1) continue;
-    const delta = next.measureNumber - cur.measureNumber;
-    if (delta > 0) refined[cur.systemIndex] = delta;
+    const span = next.systemIndex - cur.systemIndex;
+    const total = next.measureNumber - cur.measureNumber;
+    if (span < 1 || total <= 0) continue;
+    if (span === 1) { refined[cur.systemIndex] = total; continue; } // adjacent: exact
+    const dist = distributeMeasures(total, span); // gap: share the known total across it
+    if (dist) for (let s = 0; s < span; s++) refined[cur.systemIndex + s] = dist[s];
   }
   return refined;
 }
@@ -225,7 +251,7 @@ export function refineMeasureCounts(measuresPerSystem, entries) {
 // sequence (in systemIndex order) — a probable misread rather than a real
 // number. Real measure numbers only ever climb from one system to the next, so
 // the largest strictly-increasing subsequence is the trustworthy set; anything
-// off it is discarded, and those systems fall back to the barline estimate
+// off it is discarded, and those systems fall back to interpolation/barline
 // rather than being "refined" to a wrong exact count. Intended for OCR output
 // (image-only PDFs), where a stray digit can be misrecognized off the music —
 // and applied PER PAGE, never across pages, so a multi-part score whose numbers
