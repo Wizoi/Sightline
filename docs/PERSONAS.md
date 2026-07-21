@@ -639,13 +639,30 @@ hold-debounce, leaky-integrator drift correction, eased snapping.
   `renderAll()` now carries a generation counter, checked after every `await`, so a superseded
   call stops touching the DOM (clearing/appending/calling `detectSystems()`) as soon as a newer
   call has started — snap mode's own detection already re-runs inside `renderAll()`, so this alone
-  fixes it. For auto-scroll, `renderAll()` now also invalidates `state.autoScroll.analyzed` (and
-  disables the Start button) whenever it completes a re-render while a previous analysis existed,
-  with a toast explaining why — the cheap, honest fix; a fraction-of-page-height storage rewrite
-  (resolving to document pixels at use time instead of baking absolute pixels in) remains as a
-  more thorough follow-up if the toast-and-reanalyze flow proves annoying in practice. Separately,
-  `main.js`'s resize handler now debounces the `renderAll()` call itself (folded into the existing
-  400ms recalibration-check timer) rather than firing on every intermediate resize event. **General
+  fixes it. For auto-scroll, the cheap first fix was to invalidate `state.autoScroll.analyzed` on
+  every re-render and show a "layout changed, re-analyze" toast. **Superseded (2026-07-21) by the
+  fraction-based rewrite that was always the right end state:** `systemBands` are now stored
+  *page-relative* (a page index + top/center/bottom as fractions of that page's height) and
+  resolved to document pixels against the live canvas geometry at scroll/highlight time
+  (`src/systemGeometry.js`), so a resize, zoom, phone rotation, or sidebar collapse is picked up
+  automatically — no invalidation, no re-analyze, no toast. A paused schedule is re-snapped after a
+  reflow (`repositionAutoScroll()`), and `main.js` now also handles `orientationchange`. Verified
+  in-browser (Playwright) across resize/rotate/sidebar-collapse, playing and paused, at 100% and
+  150% display scaling: the highlight stays locked on the correct staff line every time. **A
+  second, related instability surfaced only once real files were driven through the pipeline at
+  varying window sizes — the deeper form of the same lesson:** analysis *itself* was
+  resolution-dependent, because detection ran on the on-screen display canvas (whose pixel
+  resolution varies with window size × zoom × DPR). At higher resolution/DPR a real 5-line staff
+  could split into 2-3-line fragments (inflating the system count) and a printed measure number
+  could fall just outside its correlation window (dropping it), silently corrupting measure counts
+  on some machines but not others — a real lead sheet ("Departure!") analyzed as 21 systems at some
+  window sizes and 23-24 at others, showing a stray "27" where an 8 belonged. **Fixed
+  (2026-07-21):** `analyzeScore()` now renders each page to a fixed 1200-row offscreen canvas for
+  detection instead of reusing the display canvas, so system/measure results are identical on every
+  machine, window size and DPI; `systemBands`' page-relative storage means on-screen scroll still
+  maps correctly at any resolution. Separately, `main.js`'s resize handler now debounces the
+  `renderAll()` call itself (folded into the existing 400ms recalibration-check timer) rather than
+  firing on every intermediate resize event. **General
   lesson: when a producer module captures derived data from the DOM/render output (pixel positions,
   bounding boxes, anything geometry-shaped), and a *different* module can trigger a re-render, the
   producer needs either to re-derive on demand or be explicitly told "that's stale now" — a shared
@@ -1050,7 +1067,10 @@ outstanding.
 - **D3** — auto-scroll's `systemBands` go stale after any resize/zoom with no invalidation; silent
   wrong-position playback is the feature's worst failure mode. Cheap fix (set `analyzed = false` +
   "layout changed, re-analyze" toast) ships now; fraction-based storage can follow later. Bundle
-  with **D2** (undebounced re-entrant `renderAll()`) — same code path, same audit.
+  with **D2** (undebounced re-entrant `renderAll()`) — same code path, same audit. **Update
+  (2026-07-21): the "later" fraction-based storage shipped and removed the toast; a follow-on fix
+  also made `analyzeScore()` render at a fixed resolution so detection no longer varies with window
+  size/DPR — full write-up in persona D's durable-findings section above.**
 - **C2** — disable `echoCancellation`/`noiseSuppression`/`autoGainControl` on the mic stream.
   Trivial, likely the single highest-value onset-quality fix available, do before considering C4.
 - **E1** — default tab is Tempo while onboarding/README/default tracking type all lead with
