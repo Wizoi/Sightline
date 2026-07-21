@@ -199,8 +199,21 @@ export function extractTempoMarks(pageItems, systemsOnPage, { pad = 24 } = {}) {
 // per-page output, concatenated in page order, already satisfies this).
 export function refineMeasureCounts(measuresPerSystem, entries) {
   const refined = [...measuresPerSystem];
-  for (let k = 0; k < entries.length - 1; k++) {
-    const cur = entries[k], next = entries[k + 1];
+  // The very first system always begins at measure 1, even though engravers
+  // almost never print a "1" over it. Without this implicit anchor the first
+  // system has no left-hand number to diff against the next numbered system,
+  // so it can't be refined and stays stuck on the raw pixel/barline estimate
+  // -- which is exactly the count most likely to be wrong on a sparse opening
+  // full of rests, the clef, time signature and tempo text (a real "30
+  // measures instead of 11" miss). Anchoring measure 1 lets the reliable
+  // printed number on the next numbered system fix it: e.g. "12" -> 12-1 = 11.
+  // Skipped when the first system genuinely carries a printed number already
+  // (no duplicate) or when nothing was numbered at all (nothing to diff).
+  const anchored = entries.length && entries[0].systemIndex !== 0
+    ? [{ systemIndex: 0, measureNumber: 1 }, ...entries]
+    : entries;
+  for (let k = 0; k < anchored.length - 1; k++) {
+    const cur = anchored[k], next = anchored[k + 1];
     if (next.systemIndex - cur.systemIndex !== 1) continue;
     const delta = next.measureNumber - cur.measureNumber;
     if (delta > 0) refined[cur.systemIndex] = delta;

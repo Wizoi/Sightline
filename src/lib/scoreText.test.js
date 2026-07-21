@@ -301,4 +301,28 @@ describe('refineMeasureCounts', () => {
   it('is a no-op with no entries', () => {
     expect(refineMeasureCounts([5, 5], [])).toEqual([5, 5]);
   });
+
+  it('anchors the unnumbered first system at measure 1 (the "Departure!" 30-vs-11 bug)', () => {
+    // System 1 has no printed "1"; system 2 prints "12". Its raw barline
+    // estimate is wildly high (30). Anchoring measure 1 fixes it to 12-1 = 11.
+    const barlineEstimate = [30, 7, 7];
+    const entries = [
+      { systemIndex: 1, measureNumber: 12 },
+      { systemIndex: 2, measureNumber: 19 },
+    ];
+    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([11, 7, 7]);
+  });
+
+  it('does not double-anchor when the first system already carries a printed number', () => {
+    const barlineEstimate = [9, 9];
+    const entries = [{ systemIndex: 0, measureNumber: 1 }, { systemIndex: 1, measureNumber: 5 }];
+    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([4, 9]);
+  });
+
+  it('cannot anchor the first system when the next numbered system is not adjacent', () => {
+    // First two systems both unnumbered; first printed number is on system 3.
+    const barlineEstimate = [30, 8, 8];
+    const entries = [{ systemIndex: 2, measureNumber: 19 }];
+    expect(refineMeasureCounts(barlineEstimate, entries)).toEqual([30, 8, 8]);
+  });
 });
