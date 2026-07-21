@@ -1,5 +1,4 @@
 import { state } from './appState.js';
-import { scoreEl } from './ui.js';
 import { pageSystemsDetailed } from './lib/systemDetection.js';
 import { estimateMeasureCount } from './lib/barlineDetection.js';
 import {
@@ -78,12 +77,31 @@ export async function analyzeScore() {
   const tmp = document.createElement('canvas');
   const tctx = tmp.getContext('2d', { willReadFrequently: true });
 
-  const canvases = Array.from(scoreEl.querySelectorAll('canvas'));
-  for (let pageIdx = 0; pageIdx < canvases.length; pageIdx++) {
-    const cv = canvases[pageIdx];
-    const ah = 1200, aw = Math.max(60, Math.round(ah * cv.width / cv.height));
+  const numPages = state.pdfDoc.numPages;
+  for (let pageIdx = 0; pageIdx < numPages; pageIdx++) {
+    const page = await state.pdfDoc.getPage(pageIdx + 1);
+
+    // Render this page to a FIXED-resolution offscreen canvas for detection,
+    // rather than reusing the on-screen display canvas. The display canvas's
+    // pixel resolution varies with window size, zoom and devicePixelRatio, and
+    // that variance made staff-line detection non-deterministic: at higher
+    // resolutions a real 5-line staff could split into 2-3-line fragments
+    // (inflating the system count) and a staff's top line could go undetected
+    // (shifting a measure number just outside its correlation window, dropping
+    // it). Both silently corrupted measure counts on some machines but not
+    // others -- confirmed on a real lead sheet ("Departure!") that analyzed as
+    // 21 systems at some window sizes and 23-24 at others. Rendering every page
+    // at the same ah=1200-row scale makes analysis produce identical systems
+    // and counts everywhere. systemBands are stored page-relative (fractions of
+    // ah), so on-screen scroll/highlight still map correctly at any resolution.
+    const ah = 1200;
+    const base = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: ah / base.height });
+    const aw = Math.max(60, Math.round(vp.width));
     tmp.width = aw; tmp.height = ah;
-    tctx.drawImage(cv, 0, 0, aw, ah);
+    tctx.fillStyle = '#fff';
+    tctx.fillRect(0, 0, aw, ah);      // ink test assumes a white ground; PDF pages may render transparent
+    try { await page.render({ canvasContext: tctx, viewport: vp }).promise; } catch (e) { continue; }
     let data;
     try { data = tctx.getImageData(0, 0, aw, ah).data; } catch (e) { continue; }
 
@@ -152,7 +170,6 @@ export async function analyzeScore() {
     // stands on its own, so a page/PDF without extractable text (a scanned
     // score, say) just skips this part rather than failing anything.
     try {
-      const page = await state.pdfDoc.getPage(pageIdx + 1);
       const content = await page.getTextContent();
       const pageViewport1x = page.getViewport({ scale: 1 });
       const pdfHeight = pageViewport1x.height;
