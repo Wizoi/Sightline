@@ -43,6 +43,29 @@ describe('buildSections', () => {
     expect(sections[2].systemBands).toEqual([band(5), band(6)]);
   });
 
+  it('slices bpmPerSystem per section and bases each on the tempo at its start', () => {
+    const systemBands = [0, 1, 2, 3].map(band);
+    const measuresPerSystem = [4, 4, 4, 4];
+    const bpmPerSystem = [86, 128, 128, 200]; // ♩=86 opens, ♩=128 at sys1, ♩=200 at sys3
+    const boundaries = [{ systemIndex: 2, name: 'Part B', tempoMarking: null }];
+    const sections = buildSections({
+      boundaries, systemBands, measuresPerSystem, bpmPerSystem, defaultBeatsPerMeasure: 4, defaultBpm: 100,
+    });
+    expect(sections[0]).toMatchObject({ bpm: 86, bpmBase: 86 });       // carry-in tempo at system 0
+    expect(sections[0].bpmPerSystem).toEqual([86, 128]);
+    expect(sections[1]).toMatchObject({ bpm: 128, bpmBase: 128 });     // carry-in tempo at system 2
+    expect(sections[1].bpmPerSystem).toEqual([128, 200]);
+  });
+
+  it('leaves bpmPerSystem null and falls back to defaultBpm when no marks are given', () => {
+    const sections = buildSections({
+      boundaries: [], systemBands: [band(0), band(1)], measuresPerSystem: [4, 4],
+      defaultBeatsPerMeasure: 4, defaultBpm: 100,
+    });
+    expect(sections[0].bpmPerSystem).toBeNull();
+    expect(sections[0]).toMatchObject({ bpm: 100, bpmBase: 100 });
+  });
+
   it('uses the boundary name at system 0 instead of the default "Score"', () => {
     const systemBands = [band(0), band(1)];
     const measuresPerSystem = [4, 4];

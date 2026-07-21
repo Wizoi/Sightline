@@ -161,6 +161,35 @@ export function extractMeasureNumbers(pageItems, systemsOnPage, { pad = 20 } = {
   return results;
 }
 
+// Printed metronome marks (♩ = N) correlated to the systems they sit above,
+// same geometry as extractMeasureNumbers: a mark is engraved just above a
+// system's top staff line. The note-value glyph itself is a music-font
+// character that pdfjs usually drops or emits separately, but the "= N" part
+// comes through the text layer as its own item (verified on MuseScore-style
+// exports), so matching `= <number>` is enough. The number is taken as the
+// beat-per-minute directly — quarter-note = N is overwhelmingly the common
+// case; a non-quarter beat unit (♩. = N, half = N) would be misread, an
+// accepted limitation rather than a full glyph-classification effort. Only
+// 30–400 is accepted, so a stray "= 5" (a voice/measure artifact) or a huge
+// number can't poison the tempo. Returns [{ systemIndex, bpm }].
+export function extractTempoMarks(pageItems, systemsOnPage, { pad = 24 } = {}) {
+  const markItems = [];
+  for (const it of pageItems) {
+    const m = it.str.match(/=\s*(\d{2,3})\b/);
+    if (!m) continue;
+    const bpm = parseInt(m[1], 10);
+    if (bpm >= 30 && bpm <= 400) markItems.push({ y: it.y, bpm });
+  }
+  const results = [];
+  for (const sys of systemsOnPage) {
+    const candidates = markItems.filter((it) => it.y <= sys.yTop + pad && it.y >= sys.yBottom);
+    if (!candidates.length) continue;
+    const best = candidates.reduce((a, b) => (Math.abs(b.y - sys.yTop) < Math.abs(a.y - sys.yTop) ? b : a));
+    results.push({ systemIndex: sys.index, bpm: best.bpm });
+  }
+  return results;
+}
+
 // Refines the pixel/barline-based measuresPerSystem estimate using real
 // printed measure numbers, wherever two *directly adjacent* systems both
 // have a known number (their difference is exact). Everywhere else --

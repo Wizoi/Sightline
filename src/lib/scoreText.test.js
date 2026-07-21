@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   TEMPO_WORDS, groupIntoRows, findTempoMarking, collectKnownNames, findSectionTitle, extractMeasureNumbers,
-  refineMeasureCounts,
+  refineMeasureCounts, extractTempoMarks,
 } from './scoreText.js';
 
 // item() mimics the simplified {str, x, y} shape scoreAnalysis.js extracts
@@ -235,6 +235,40 @@ describe('extractMeasureNumbers', () => {
     const items = [item('5', 0, 100), item('9', 0, 108)]; // both within pad of yTop=95
     const systems = [{ index: 0, yTop: 95, yBottom: 80 }];
     expect(extractMeasureNumbers(items, systems)).toEqual([{ systemIndex: 0, measureNumber: 5 }]);
+  });
+});
+
+describe('extractTempoMarks', () => {
+  it('reads "= N" metronome marks and ties them to the system below', () => {
+    // Mirrors the Cruel Angel's Thesis layout: ♩=86 above system 0, ♩=128
+    // above system 1. pdfjs drops the note glyph, so the text item is "= 86".
+    const items = [item('= 86', 60, 735), item('= 128', 60, 620)];
+    const systems = [
+      { index: 0, yTop: 730, yBottom: 700 },
+      { index: 1, yTop: 615, yBottom: 585 },
+    ];
+    expect(extractTempoMarks(items, systems)).toEqual([
+      { systemIndex: 0, bpm: 86 },
+      { systemIndex: 1, bpm: 128 },
+    ]);
+  });
+
+  it('accepts marks with no space and a leading note glyph in the same item', () => {
+    const items = [item('♩=100', 60, 505)];
+    const systems = [{ index: 0, yTop: 500, yBottom: 480 }];
+    expect(extractTempoMarks(items, systems)).toEqual([{ systemIndex: 0, bpm: 100 }]);
+  });
+
+  it('ignores implausible numbers (a stray "= 5" or a huge value)', () => {
+    const items = [item('= 5', 60, 505), item('= 999', 60, 504)];
+    const systems = [{ index: 0, yTop: 500, yBottom: 480 }];
+    expect(extractTempoMarks(items, systems)).toEqual([]);
+  });
+
+  it('returns nothing for a system with no mark in range', () => {
+    const items = [item('= 120', 60, 900)]; // far above the system
+    const systems = [{ index: 0, yTop: 500, yBottom: 480 }];
+    expect(extractTempoMarks(items, systems)).toEqual([]);
   });
 });
 

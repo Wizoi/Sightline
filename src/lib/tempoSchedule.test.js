@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSchedule, systemIndexAtElapsed, progressWithinSystem, nearestSystemIndex, beatTimestamps, nearestBeatTime } from './tempoSchedule.js';
+import { buildSchedule, systemIndexAtElapsed, progressWithinSystem, nearestSystemIndex, beatTimestamps, nearestBeatTime, resolveBpmPerSystem } from './tempoSchedule.js';
 
 // measures [2,3,1], 4/4 @ 120bpm (0.5s/beat) -> durations 4s, 6s, 2s -> starts 0,4,10 -> total 12
 function sampleSchedule() {
@@ -10,11 +10,25 @@ describe('buildSchedule', () => {
   it('computes per-system start/duration/end and a total duration', () => {
     const s = sampleSchedule();
     expect(s.systems).toEqual([
-      { index: 0, measures: 2, duration: 4, start: 0, end: 4 },
-      { index: 1, measures: 3, duration: 6, start: 4, end: 10 },
-      { index: 2, measures: 1, duration: 2, start: 10, end: 12 },
+      { index: 0, measures: 2, duration: 4, start: 0, end: 4, bpm: 120 },
+      { index: 1, measures: 3, duration: 6, start: 4, end: 10, bpm: 120 },
+      { index: 2, measures: 1, duration: 2, start: 10, end: 12, bpm: 120 },
     ]);
     expect(s.totalDuration).toBe(12);
+  });
+
+  it('gives each system its own tempo from bpmPerSystem, changing durations mid-piece', () => {
+    // measures [4,4], 4/4; system 0 @ 60bpm (1s/beat -> 16s), system 1 @ 120bpm (0.5s/beat -> 8s)
+    const s = buildSchedule({ measuresPerSystem: [4, 4], beatsPerMeasure: 4, bpm: 100, bpmPerSystem: [60, 120] });
+    expect(s.systems[0]).toMatchObject({ duration: 16, start: 0, end: 16, bpm: 60 });
+    expect(s.systems[1]).toMatchObject({ duration: 8, start: 16, end: 24, bpm: 120 });
+    expect(s.totalDuration).toBe(24);
+  });
+
+  it('falls back to flat bpm for systems missing a bpmPerSystem entry', () => {
+    const s = buildSchedule({ measuresPerSystem: [1, 1], beatsPerMeasure: 4, bpm: 60, bpmPerSystem: [120] });
+    expect(s.systems[0].bpm).toBe(120); // has an entry
+    expect(s.systems[1].bpm).toBe(60);  // missing -> flat bpm
   });
 
   it('scales duration inversely with bpm', () => {
@@ -62,6 +76,20 @@ describe('progressWithinSystem', () => {
   it('reports progress 1 (not NaN) for a zero-duration system', () => {
     const degenerate = { systems: [{ index: 0, start: 0, end: 0, duration: 0 }], totalDuration: 0 };
     expect(progressWithinSystem(degenerate, 0)).toEqual({ index: 0, progress: 1 });
+  });
+});
+
+describe('resolveBpmPerSystem', () => {
+  it('carries each printed tempo mark forward until the next one', () => {
+    // marks: ♩=86 at system 0, ♩=128 at system 1 -> [86, 128, 128, 128]
+    expect(resolveBpmPerSystem(4, { 0: 86, 1: 128 }, 100)).toEqual([86, 128, 128, 128]);
+  });
+  it('uses the base bpm for systems before the first mark', () => {
+    // first mark at system 2 -> systems 0,1 use base 100, then 140 onward
+    expect(resolveBpmPerSystem(4, { 2: 140 }, 100)).toEqual([100, 100, 140, 140]);
+  });
+  it('returns the flat base bpm when there are no marks', () => {
+    expect(resolveBpmPerSystem(3, {}, 100)).toEqual([100, 100, 100]);
   });
 });
 

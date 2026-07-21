@@ -4,9 +4,10 @@ import { pageSystemsDetailed } from './lib/systemDetection.js';
 import { estimateMeasureCount } from './lib/barlineDetection.js';
 import {
   groupIntoRows, collectKnownNames, findSectionTitle, findTempoMarking,
-  extractMeasureNumbers, refineMeasureCounts,
+  extractMeasureNumbers, refineMeasureCounts, extractTempoMarks,
 } from './lib/scoreText.js';
 import { buildSections } from './lib/scoreSections.js';
+import { resolveBpmPerSystem } from './lib/tempoSchedule.js';
 import { detectTimeSignature } from './timeSigDetection.js';
 
 // Time-signature glyphs are small — at the shared analysis canvas's
@@ -70,6 +71,7 @@ export async function analyzeScore() {
   const measuresPerSystem = [];
   const boundaries = [];
   const measureNumberEntries = [];
+  const tempoMarkEntries = []; // { systemIndex (global), bpm } from printed ♩=N marks
   const timeSigByIndex = {}; // global system index -> best-effort {beatsPerMeasure, noteValue, confidence}
   let knownNames = [];
 
@@ -203,18 +205,39 @@ export async function analyzeScore() {
       }
 
       measureNumberEntries.push(...extractMeasureNumbers(pageItems, systemsForText));
+      tempoMarkEntries.push(...extractTempoMarks(pageItems, systemsForText));
     } catch (e) { /* no text layer on this page — pixel detection above is unaffected */ }
   }
 
   const refinedMeasures = refineMeasureCounts(measuresPerSystem, measureNumberEntries);
 
+  // Collapse the printed ♩=N marks into one tempo per system (first mark on a
+  // system wins; carried forward from there). Only build a bpmPerSystem when
+  // marks were actually found — otherwise leave it null so playback stays flat
+  // on the manual Tempo slider exactly as before.
+  const tempoByIndex = {};
+  for (const e of tempoMarkEntries) if (tempoByIndex[e.systemIndex] == null) tempoByIndex[e.systemIndex] = e.bpm;
+  const hasTempoMarks = Object.keys(tempoByIndex).length > 0;
+  const bpmPerSystem = hasTempoMarks
+    ? resolveBpmPerSystem(systemBands.length, tempoByIndex, state.autoScroll.bpm)
+    : null;
+
+  // When the score prints its own tempo, adopt the opening tempo as the base
+  // the manual slider starts from (so the slider reads the real tempo and
+  // scales the whole piece proportionally from there). With no marks, keep the
+  // user's current slider value as the flat tempo, exactly as before.
+  if (hasTempoMarks) state.autoScroll.bpm = bpmPerSystem[0];
+  state.autoScroll.bpmBase = state.autoScroll.bpm;
+
   state.autoScroll.systemBands = systemBands;
   state.autoScroll.measuresPerSystem = refinedMeasures;
+  state.autoScroll.bpmPerSystem = bpmPerSystem;
   state.autoScroll.analyzed = systemBands.length > 0;
   state.autoScroll.sections = buildSections({
     boundaries,
     systemBands,
     measuresPerSystem: refinedMeasures,
+    bpmPerSystem,
     defaultBeatsPerMeasure: state.autoScroll.beatsPerMeasure,
     defaultBpm: state.autoScroll.bpm,
   });
@@ -236,5 +259,13 @@ export async function analyzeScore() {
     }
   }
 
-  return { systemCount: systemBands.length, measuresPerSystem: refinedMeasures, warnings, sections: state.autoScroll.sections };
+  // Distinct tempos in document order (e.g. [86, 128]) for the UI's
+  // "tempo changes detected" note — only meaningful when there's more than one.
+  const tempoSequence = [];
+  if (bpmPerSystem) for (const b of bpmPerSystem) if (b !== tempoSequence[tempoSequence.length - 1]) tempoSequence.push(b);
+
+  return {
+    systemCount: systemBands.length, measuresPerSystem: refinedMeasures, warnings,
+    sections: state.autoScroll.sections, tempoSequence,
+  };
 }

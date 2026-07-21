@@ -79,7 +79,14 @@ export const state = {
     systemBands: [],             // [{ page, fracCenter, fracMin, fracMax }] per system — page-relative, from scoreAnalysis; resolved to doc px at use time via systemGeometry.js so they survive resize/zoom/rotation
     measuresPerSystem: [],       // editable estimate, one entry per system
     beatsPerMeasure: 4,
-    bpm: 100,
+    bpm: 100,                    // manual Tempo slider — also the fallback tempo for pieces with no printed ♩=N marks
+    // Per-system tempo from printed metronome marks (♩=N), one entry per
+    // system, carried forward from each mark; null when none were detected
+    // (then playback is flat `bpm`). bpmBase is the reference the manual Tempo
+    // slider scales against, so moving it speeds/slows the whole piece while
+    // keeping the printed tempo *ratios* intact. See lib/tempoSchedule.js.
+    bpmPerSystem: null,
+    bpmBase: 100,
 
     // Parts/movements detected within a single PDF (e.g. a full score
     // followed by individual instrument parts) — see lib/scoreSections.js.

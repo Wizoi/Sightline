@@ -113,6 +113,19 @@ function renderSummary(result) {
   $('autoScrollSummary').textContent = result.systemCount
     ? `Found ${result.systemCount} systems.`
     : 'No systems found.';
+
+  // Printed tempo changes (♩=N marks) are applied automatically; show them so
+  // it's clear the piece won't run at one flat tempo, and that the manual
+  // Tempo slider now scales all of them together. A single tempo (or none
+  // detected) shows nothing — the slider behaves exactly as it always has.
+  const seq = result.tempoSequence || [];
+  const tempoInfo = $('autoScrollTempoInfo');
+  if (seq.length > 1) {
+    tempoInfo.textContent = `🎵 Tempo changes detected (${seq.map((b) => '♩=' + b).join(' → ')}) — applied automatically. Use Playback speed to practice slower.`;
+  } else {
+    tempoInfo.textContent = '';
+  }
+
   $('autoScrollWarnings').innerHTML = result.warnings.map((w) => '<li>' + w + '</li>').join('');
 
   // More than one section means this PDF is a full score plus individual
@@ -124,6 +137,12 @@ function renderSummary(result) {
     selectSection(0); // also renders the sections list + measures list
   } else {
     $('sectionsBox').classList.add('hidden');
+    // A single section doesn't go through selectSection(), so mirror its Tempo
+    // slider sync here: analyzeScore() may have adopted the score's printed
+    // opening tempo as the new base, and the slider must reflect it.
+    $('bpmInput').value = state.autoScroll.bpm;
+    $('bpmV').textContent = state.autoScroll.bpm + ' bpm';
+    refreshTempoLabel();
     renderMeasuresList();
   }
 }
@@ -143,6 +162,8 @@ function selectSection(idx) {
   as.measuresPerSystem = sec.measuresPerSystem;
   as.beatsPerMeasure = sec.beatsPerMeasure;
   as.bpm = sec.bpm;
+  as.bpmPerSystem = sec.bpmPerSystem;
+  as.bpmBase = sec.bpmBase;
 
   $('beatsPerMeasure').value = sec.beatsPerMeasure;
   $('beatsPerMeasureV').textContent = String(sec.beatsPerMeasure);

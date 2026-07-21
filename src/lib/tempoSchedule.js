@@ -6,18 +6,40 @@
 
 // measuresPerSystem: number[], one entry per system, in document order.
 // beatsPerMeasure: number (e.g. 4 for 4/4, 3 for 3/4).
-// bpm: beats per minute.
-// Returns: { systems: [{ index, measures, duration, start, end }], totalDuration }
-export function buildSchedule({ measuresPerSystem, beatsPerMeasure, bpm }) {
-  const secPerBeat = 60 / bpm;
+// bpm: beats per minute — the flat fallback used for any system without its
+//   own entry in bpmPerSystem (and for the whole piece when bpmPerSystem is
+//   absent, i.e. no printed metronome marks were detected).
+// bpmPerSystem: optional number[] parallel to measuresPerSystem — each
+//   system's own tempo, from printed ♩=N marks carried forward (see
+//   resolveBpmPerSystem + scoreAnalysis.js). This is what makes auto-scroll
+//   change tempo mid-piece to match the score instead of running everything
+//   at one BPM.
+// Returns: { systems: [{ index, measures, duration, start, end, bpm }], totalDuration }
+export function buildSchedule({ measuresPerSystem, beatsPerMeasure, bpm, bpmPerSystem }) {
   let t = 0;
   const systems = measuresPerSystem.map((measures, index) => {
-    const duration = measures * beatsPerMeasure * secPerBeat;
+    const sysBpm = bpmPerSystem && bpmPerSystem[index] > 0 ? bpmPerSystem[index] : bpm;
+    const duration = measures * beatsPerMeasure * (60 / sysBpm);
     const start = t;
     t += duration;
-    return { index, measures, duration, start, end: t };
+    return { index, measures, duration, start, end: t, bpm: sysBpm };
   });
   return { systems, totalDuration: t };
+}
+
+// Expands sparse printed tempo marks into one BPM per system by carrying each
+// mark forward until the next one — a ♩=N at system k sets the tempo for
+// system k and every system after it, until another mark overrides it.
+// Systems before the first mark use baseBpm (the manual Tempo slider). Returns
+// a number[] parallel to the systems. tempoByIndex: { systemIndex: bpm }.
+export function resolveBpmPerSystem(total, tempoByIndex, baseBpm) {
+  const out = [];
+  let cur = baseBpm;
+  for (let i = 0; i < total; i++) {
+    if (tempoByIndex[i] > 0) cur = tempoByIndex[i];
+    out.push(cur);
+  }
+  return out;
 }
 
 // Which system is "current" at elapsed time t (clamped to the schedule's

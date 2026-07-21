@@ -1,6 +1,6 @@
 import { cfg, state } from './appState.js';
 import { $, toast, setStatus, applyBand, syncAutoScrollButton } from './ui.js';
-import { buildSchedule, progressWithinSystem, nearestSystemIndex } from './lib/tempoSchedule.js';
+import { buildSchedule, progressWithinSystem, systemIndexAtElapsed } from './lib/tempoSchedule.js';
 import { decayIfQuiet, correctionStatus } from './lib/tempoCorrection.js';
 import { resolveBand, scoreCanvases } from './systemGeometry.js';
 
@@ -17,6 +17,17 @@ const LIVE_STATUS_LABEL = {
 // state.following/camera state.
 let lastFrame = 0;
 
+// The per-system tempo actually fed to the schedule: the detected ♩=N marks
+// (bpmPerSystem) scaled by how far the manual Tempo slider has been moved from
+// the piece's reference tempo (bpmBase), so the slider speeds/slows the whole
+// piece while preserving the printed tempo *ratios*. null (→ flat `bpm`) when
+// no marks were detected, exactly as before this feature.
+function currentBpmPerSystem(as) {
+  if (!as.bpmPerSystem) return null;
+  const scale = as.bpmBase > 0 ? as.bpm / as.bpmBase : 1;
+  return as.bpmPerSystem.map((b) => b * scale);
+}
+
 export function startAutoScroll() {
   const as = state.autoScroll;
   if (!as.analyzed || !as.measuresPerSystem.length) { toast('Run "Analyze score" first'); return false; }
@@ -25,16 +36,13 @@ export function startAutoScroll() {
     measuresPerSystem: as.measuresPerSystem,
     beatsPerMeasure: as.beatsPerMeasure,
     bpm: as.bpm,
+    bpmPerSystem: currentBpmPerSystem(as),
   });
 
-  // Start from whichever system is nearest wherever the user has already
-  // scrolled to — "scroll to the starting group, then hit go." Bands are
-  // page-relative, so resolve them against the current layout first.
-  const canvases = scoreCanvases();
-  const centers = as.systemBands.map((b) => { const g = resolveBand(b, canvases); return g ? g.center : 0; });
-  const viewportCenterDoc = window.scrollY + window.innerHeight / 2;
-  const startIdx = nearestSystemIndex(centers, viewportCenterDoc);
-  as.scheduleElapsed = as.schedule.systems[startIdx] ? as.schedule.systems[startIdx].start : 0;
+  // Always start at the very first system (measure 1). tick() then scrolls the
+  // page to it, so Start reliably begins at the top regardless of where the
+  // user happened to scroll while reviewing the analysis.
+  as.scheduleElapsed = 0;
   as.playing = true;
   applyBand();
   syncAutoScrollButton();
@@ -62,6 +70,7 @@ export function rebuildScheduleLive() {
     measuresPerSystem: as.measuresPerSystem,
     beatsPerMeasure: as.beatsPerMeasure,
     bpm: as.bpm,
+    bpmPerSystem: currentBpmPerSystem(as),
   });
   const s = index >= 0 ? as.schedule.systems[index] : null;
   as.scheduleElapsed = s ? s.start + progress * s.duration : 0;
@@ -95,7 +104,16 @@ function hideHighlight() {
 export function currentTempoLabel() {
   const as = state.autoScroll;
   const correction = as.liveTempoEnabled ? as.tempoCorrection.correction : 1;
-  return Math.round(as.bpm * as.tempoPct * correction) + ' bpm';
+  // With detected tempo changes, the HUD shows the tempo of the system playing
+  // right now (each schedule system carries its own bpm), not the base slider
+  // value — so the number tracks the ♩=86→♩=128 change as it happens. Falls
+  // back to the slider value before playback starts or when no marks exist.
+  let base = as.bpm;
+  if (as.schedule) {
+    const idx = systemIndexAtElapsed(as.schedule, as.scheduleElapsed);
+    if (idx >= 0 && as.schedule.systems[idx]) base = as.schedule.systems[idx].bpm;
+  }
+  return Math.round(base * as.tempoPct * correction) + ' bpm';
 }
 
 // Resolves the current schedule position to a scroll target + highlight

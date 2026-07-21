@@ -14,8 +14,13 @@
 // include systemIndex 0 -- the first section is always implied even when
 // nothing was detected there (e.g. a full score's opening page lists every
 // instrument, so no single name matches it -- see collectKnownNames).
+// bpmPerSystem: optional whole-document number[] (per-system tempo from
+// printed ♩=N marks; see resolveBpmPerSystem). Sliced per section like
+// systemBands. A section's `bpm`/`bpmBase` become the tempo in force at its
+// first system (the carry-in), so its own manual Tempo slider starts at the
+// right value and scales the section's marks proportionally.
 export function buildSections({
-  boundaries, systemBands, measuresPerSystem, defaultBeatsPerMeasure, defaultBpm,
+  boundaries, systemBands, measuresPerSystem, bpmPerSystem, defaultBeatsPerMeasure, defaultBpm,
 }) {
   const total = systemBands.length;
   if (!total) return [];
@@ -26,6 +31,7 @@ export function buildSections({
   return uniqueStarts.map((startIdx, i) => {
     const endIdx = (i + 1 < uniqueStarts.length ? uniqueStarts[i + 1] : total) - 1;
     const boundary = boundaries.find((b) => b.systemIndex === startIdx);
+    const secBpm = bpmPerSystem && bpmPerSystem[startIdx] > 0 ? bpmPerSystem[startIdx] : defaultBpm;
     return {
       name: boundary ? boundary.name : (i === 0 ? 'Score' : `Section ${i + 1}`),
       tempoMarking: boundary ? boundary.tempoMarking || null : null,
@@ -33,8 +39,10 @@ export function buildSections({
       endSystemIndex: endIdx,
       systemBands: systemBands.slice(startIdx, endIdx + 1),
       measuresPerSystem: measuresPerSystem.slice(startIdx, endIdx + 1),
+      bpmPerSystem: bpmPerSystem ? bpmPerSystem.slice(startIdx, endIdx + 1) : null,
       beatsPerMeasure: defaultBeatsPerMeasure,
-      bpm: defaultBpm,
+      bpm: secBpm,
+      bpmBase: secBpm,
     };
   });
 }
