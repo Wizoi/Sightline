@@ -1,5 +1,5 @@
 import { cfg, state } from './appState.js';
-import { $, toast, setStatus, applyBand } from './ui.js';
+import { $, toast, setStatus, applyBand, syncAutoScrollButton } from './ui.js';
 import { buildSchedule, progressWithinSystem, nearestSystemIndex } from './lib/tempoSchedule.js';
 import { decayIfQuiet, correctionStatus } from './lib/tempoCorrection.js';
 
@@ -34,6 +34,7 @@ export function startAutoScroll() {
   as.scheduleElapsed = as.schedule.systems[startIdx] ? as.schedule.systems[startIdx].start : 0;
   as.playing = true;
   applyBand();
+  syncAutoScrollButton();
   return true;
 }
 
@@ -66,6 +67,7 @@ export function rebuildScheduleLive() {
 export function pauseAutoScroll() {
   state.autoScroll.playing = false;
   applyBand();
+  syncAutoScrollButton();
 }
 
 export function stopAutoScroll() {
@@ -74,6 +76,7 @@ export function stopAutoScroll() {
   state.autoScroll.scheduleElapsed = 0;
   hideHighlight();
   applyBand();
+  syncAutoScrollButton();
 }
 
 function hideHighlight() {
@@ -118,6 +121,7 @@ function tick(now) {
     as.scheduleElapsed = as.schedule.totalDuration;
     as.playing = false;
     reachedEnd = true;
+    syncAutoScrollButton();
   }
 
   const { index, progress } = progressWithinSystem(as.schedule, as.scheduleElapsed);

@@ -1,7 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { cfg, state } from './appState.js';
-import { $, scoreEl, emptyEl, toast } from './ui.js';
+import { $, scoreEl, emptyEl, toast, syncAutoScrollButton } from './ui.js';
 import { detectSystems } from './systemDetection.js';
 import { canFollow } from './tracking/index.js';
 
@@ -60,8 +60,12 @@ export async function renderAll() {
   // scrolling/highlighting the wrong place next time it's started.
   if (state.autoScroll.analyzed) {
     state.autoScroll.analyzed = false;
-    const startBtn = $('autoScrollStart');
-    if (startBtn) startBtn.disabled = true;
+    // Uses the shared sync helper, not a blind disable: if auto-scroll is
+    // actively playing right now, this button is the only way to pause it,
+    // and must stay enabled/labeled "Pause" -- see ui.js's
+    // syncAutoScrollButton() for why analyzed=false alone doesn't disable it
+    // while playing.
+    syncAutoScrollButton();
     toast('Score layout changed — re-analyze for auto-scroll before starting.');
   }
 }

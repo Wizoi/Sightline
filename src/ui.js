@@ -35,6 +35,28 @@ export function applyBand() {
   $('rightMark').style.left = (cfg.rightZoneFrac * 100) + 'vw';
 }
 
+// Keeps the single Start/Pause auto-scroll button in sync with playback and
+// analysis state. Lives here (not autoScrollUI.js) so autoScrollController.js
+// and pdf.js can both call it -- autoScrollUI.js already imports FROM
+// autoScrollController.js, so putting it there would create an import cycle.
+// Called from: autoScrollController.js's startAutoScroll()/pauseAutoScroll()/
+// stopAutoScroll()/tick() (reaching the end of a piece flips `playing`
+// without going through a click handler), and pdf.js (a re-render
+// invalidating a stale analysis mid-playback must NOT disable this button,
+// since it's the only way to pause what's still actively playing).
+export function syncAutoScrollButton() {
+  const as = state.autoScroll;
+  const btn = $('autoScrollStart');
+  if (!btn) return;
+  if (as.playing) {
+    btn.disabled = false;
+    btn.textContent = '⏸ Pause auto-scroll';
+  } else {
+    btn.disabled = !as.analyzed || !as.measuresPerSystem.length;
+    btn.textContent = '▶ Start auto-scroll';
+  }
+}
+
 export function showRecalBanner(reasons) {
   $('recalMsg').textContent = 'Setup changed (' + reasons.join(', ') + ') — recalibrate for best accuracy.';
   $('recal').style.display = 'flex';

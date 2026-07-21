@@ -1,5 +1,5 @@
 import { state } from './appState.js';
-import { $, toast, setStatus } from './ui.js';
+import { $, toast, setStatus, syncAutoScrollButton } from './ui.js';
 import { analyzeScore } from './scoreAnalysis.js';
 import { startAutoScroll, pauseAutoScroll, stopAutoScroll, currentTempoLabel, rebuildScheduleLive } from './autoScrollController.js';
 import { startLiveTempo, stopLiveTempo } from './liveTempo.js';
@@ -39,8 +39,7 @@ export function initAutoScrollUI() {
   $('analyzeScoreBtn').onclick = async () => {
     if (!state.pdfDoc) { toast('Load a PDF first'); return; }
     stopAutoScroll();
-    $('autoScrollStart').disabled = true;
-    $('autoScrollPause').disabled = true;
+    $('autoScrollStart').disabled = true; // force-disabled during the async analysis itself
     $('analyzeScoreBtn').disabled = true;
     let result;
     try {
@@ -49,11 +48,19 @@ export function initAutoScrollUI() {
       $('analyzeScoreBtn').disabled = false;
     }
     renderSummary(result);
-    $('autoScrollStart').disabled = !state.autoScroll.analyzed;
+    syncAutoScrollButton();
     toast(result.systemCount ? `Analyzed ${result.systemCount} systems` : 'No systems found');
   };
 
+  // One button, toggling Start <-> Pause (same pattern as the Follow-eyes
+  // button) -- its label/enabled state is kept in sync by
+  // syncAutoScrollButton(), called from every place playback state changes.
   $('autoScrollStart').onclick = () => {
+    if (state.autoScroll.playing) {
+      pauseAutoScrollUI();
+      setStatus('', 'auto-scroll paused');
+      return;
+    }
     if (!startAutoScroll()) return;
     // Eye/wink tracking and Auto-scroll are alternatives, not used
     // together — both drive window.scrollTo() on their own rAF loop.
@@ -61,13 +68,7 @@ export function initAutoScrollUI() {
       setFollowing(false);
       toast('Follow eyes paused — switched to Auto-scroll');
     }
-    $('autoScrollStart').disabled = true;
-    $('autoScrollPause').disabled = false;
     refreshTempoLabel();
-  };
-  $('autoScrollPause').onclick = () => {
-    pauseAutoScrollUI();
-    setStatus('', 'auto-scroll paused');
   };
 
   $('sectionsSelect').addEventListener('change', () => {
@@ -91,15 +92,16 @@ export function initAutoScrollUI() {
   };
 
   if (state.autoScroll.analyzed) renderSummary({ systemCount: state.autoScroll.systemBands.length, warnings: [] });
+  syncAutoScrollButton();
 }
 
-// Pauses auto-scroll and syncs its Start/Pause button state — shared by
-// the Pause button itself and by main.js, which calls this when the user
-// switches to Follow eyes while auto-scroll is playing.
+// Pauses auto-scroll — a thin, named wrapper kept for the call site in
+// main.js (switching to Follow eyes while auto-scroll is playing), which
+// reads more clearly as "pause the UI" than "call the controller function
+// directly." pauseAutoScroll() itself already keeps the Start/Pause button
+// in sync (see ui.js's syncAutoScrollButton()).
 export function pauseAutoScrollUI() {
   pauseAutoScroll();
-  $('autoScrollStart').disabled = false;
-  $('autoScrollPause').disabled = true;
 }
 
 function refreshTempoLabel() {
@@ -147,8 +149,10 @@ function selectSection(idx) {
   $('bpmV').textContent = sec.bpm + ' bpm';
   refreshTempoLabel();
 
-  stopAutoScroll(); // the active range just changed -- any in-progress schedule is stale
-  $('autoScrollStart').disabled = !as.measuresPerSystem.length;
+  // the active range just changed -- any in-progress schedule is stale.
+  // stopAutoScroll() also re-syncs the Start/Pause button, using the
+  // measuresPerSystem/analyzed values already updated above.
+  stopAutoScroll();
 
   renderSectionsList();
   renderMeasuresList();
