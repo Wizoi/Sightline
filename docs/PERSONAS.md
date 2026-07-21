@@ -55,12 +55,96 @@ blendshapes), rigid-body head-pose estimation, wink/blink detection.
   model-version bump edited in only one copy would have invalidated saved calibrations
   inconsistently depending on which copy a given call site happened to import.
 
+**Infrared (IR) gaze tracking — researched and declined (2026-07-20), full detail below rather than
+just an open question, since this was a real two-thread research spike, not idle speculation:**
+- **The web platform has no standardized way to access camera *spectrum* at all**, confirmed via a
+  still-open, unresolved W3C spec issue (`w3c/mediacapture-extensions#14`, filed 2020 by a Microsoft
+  Edge engineer requesting exactly this, still unanswered as of this research). The only workaround
+  a W3C spec editor offered on the record was literally "look for ' IR ' in the label" — and that's
+  not even reliable (a real Surface Laptop 3's IR sensor is labeled "AvStream Media Device," no
+  "IR" anywhere in it).
+- **Whether a laptop's IR sensor is even reachable via `getUserMedia()` is an OEM driver coin-flip,
+  not a Sightline-controllable property.** Microsoft's own "Windows Hello Camera Driver Bring Up
+  Guide" documents a `SkipCameraEnumeration` INF flag that exists specifically to **hide** the IR
+  sensor from ordinary apps — non-exposure is the documented default intent; exposure (as seen on
+  a real Surface Book/Surface Laptop 3) is OEM variance, not a supported integration point. Across
+  a real school's mixed Lenovo/Dell/HP fleet, this would be inconsistent per-device, not a
+  reliable capability to design a feature around.
+- **Even where reachable, there's no way to control the IR illuminator LED from a web page** — the
+  actual light-emitting hardware is gated behind a private kernel-streaming DDI
+  (`KSPROPERTY_CAMERACONTROL_EXTENDED_FACEAUTH_MODE`) exclusive to the OS biometric subsystem, with
+  no path from JavaScript to it at all (the closest web-platform analog, the Image Capture spec's
+  `torch` constraint, only ever controls a phone's visible-light camera flash, and was never
+  extended to IR).
+- **The accuracy advantage of professional (Tobii-class) trackers is a hardware/geometry property,
+  not a spectral-band one.** PCCR (pupil-center corneal-reflection) tracking needs a *controlled,
+  known-position* IR LED to produce a trackable corneal glint at a geometrically predictable
+  location — that's what gives ~0.3-0.6° accuracy. Bare IR-band *sensitivity* without a controlled,
+  synchronized emitter (which is the most this app could ever realistically get, per the point
+  above) would at best give a cleaner low-light image for an appearance-based method — the same
+  class of technique this app already uses, not a jump to PCCR-class precision.
+- **MediaPipe's FaceLandmarker (what this app already uses) is RGB-only, with no documented IR
+  behavior, and the closest analogous evidence says it wouldn't degrade gracefully.** Two long-open
+  MediaPipe GitHub issues ask this exact question with no maintainer answer; a sibling MediaPipe
+  Task (Hands) that *was* tested on IR input was reported to fail badly (losing hand shape,
+  frequent tracking failures) rather than gracefully — consistent with the broader RGB→IR
+  domain-gap literature, which treats this as a nontrivial research problem, not a drop-in swap.
+- **No IR-webcam-class dataset or model exists to build on, even for a custom approach.** Every
+  genuinely IR-based gaze dataset found (OpenEDS/OpenSFEDS, automotive driver-monitoring systems)
+  uses purpose-built, close-range, or dedicated-illuminator hardware — VR-headset-interior cameras
+  a few centimeters from the eye, or dashboard rigs with six dedicated NIR LEDs — with no
+  relationship to a webcam on a music stand. Building an IR version from scratch would mean
+  collecting an entirely new dataset; there's no shortcut.
+- **A custom *RGB* appearance-based model, by contrast, is realistic and already has a concrete
+  reference implementation: WebEyeTrack** (arXiv:2508.19544, 2025, MIT-licensed,
+  `github.com/RedForestAi/WebEyeTrack`, published as both a PyPI and npm package). A 0.16M-param
+  (670KB) CNN running via TF.js, with **on-device few-shot personalization from as few as 9
+  calibration samples** — numerically identical to this app's own 9-point calibration count.
+  Reports 2-5cm/°-class point-of-gaze error, in the same range as this app's current MediaPipe-iris
+  approach, and degrades more gracefully over a session than WebGazer.js (the other
+  actively-referenced browser gaze library, RGB-only, "maintenance mode" but not dead).
+- **Verdict: IR is not a fruitful direction for this app** — not because it's technically
+  unbuildable in the abstract, but because every layer (web platform access, illuminator control,
+  the underlying accuracy mechanism, dataset availability) independently comes back negative for
+  the "ordinary school laptop webcam" scenario this app actually runs on. **If reconsidering,
+  the specific condition that would change this verdict is a controllable, known-position IR
+  illuminator becoming standard web-platform-accessible hardware** (not just an IR-sensitive
+  sensor) — short of that, PCCR-class accuracy is architecturally out of reach regardless of
+  software effort.
+- **A real, falsifiable next step exists on the RGB side, if accuracy improvement is still wanted**
+  (a separate, uncoupled question from the IR one above): spike integrating the `webeyetrack` npm
+  package on a throwaway branch, A/B it against the current MediaPipe-iris + ridge-regression
+  pipeline with 3-5 real users under the same 9-point calibration protocol, and measure whether its
+  post-calibration *zone-classification* accuracy (does it land in the correct discrete page-turn
+  trigger zone — the actual bar this app needs, not raw cm/degree error) meets or beats what's
+  shipped today. Not yet done; genuinely open if pursued.
+- **Methodological note:** no browser automation was available in this research session either
+  (see QA persona), so this was pure literature/spec/issue-tracker research, not hands-on testing.
+  A standalone diagnostic page (enumerate video input devices, flag IR/Hello-suggestive labels,
+  live-preview each one, dump `getCapabilities()`) was built and handed to the user to actually
+  check their own real hardware — genuine verification of the "is a sensor even exposed" question
+  needs a real device, which no amount of further research alone can substitute for. **Result on
+  the one real machine tested: exactly one camera device, no IR-suggestive label, and
+  `getCapabilities()` reporting a `colorTemperature` range (2800-6500K) and full white-balance/
+  saturation controls — conclusively an RGB sensor, not IR.** Consistent with the literature
+  verdict above, not just a coincidence: no second device to even consider. (Getting a clean read
+  took a couple of iterations — the diagnostic itself had two real bugs surfaced by that testing,
+  both about `getUserMedia()` device-reopening edge cases rather than anything IR-specific: a
+  close-then-immediately-reopen race with the OS driver, and `deviceId: {exact: ...}` failing on a
+  `file://` origin even for a device ID `enumerateDevices()` had just returned. Fixed by switching
+  to `deviceId: {ideal: ...}` and adding a retry-with-delay — the general lesson being that
+  `file://` is a meaningfully less-tested origin for `getUserMedia()` device-selection edge cases
+  than a real server origin, worth remembering for any future ad hoc browser-capability testing
+  page, not just this one.)
+
 **Open questions / future research:**
 - Whether iris landmarks alone (without full FaceLandmarker) could reduce the ~13MB first-load
   fetch further — not investigated. The fetch is now same-origin (see Privacy/Architecture
   persona), so this would only help load time, not the CDN-blocking failure mode that motivated
   self-hosting in the first place.
 - Robustness under glasses glare / low light beyond what "Check accuracy" already surfaces.
+- Whether the WebEyeTrack spike above (RGB appearance-based CNN, not IR) is worth pursuing — see
+  the falsifiable next step spelled out above.
 
 ---
 
@@ -815,6 +899,13 @@ established.
   accuracy — ships safely inert** (region-finding is correct and kept; digit classification
   against generic font glyphs isn't). Would need real music-engraving-font reference glyphs to
   reconsider, not a different algorithm. (Persona 3)
+- Infrared (IR) camera-based gaze tracking: **declined — no web-platform API for camera spectrum
+  or illuminator control, OEM-driver-dependent sensor exposure, MediaPipe untrained/unvalidated for
+  IR, and no IR-webcam-class dataset exists to build a custom model from.** The professional-tracker
+  accuracy gain is a controlled-illuminator hardware property, not a spectral one, so it's out of
+  reach regardless of software effort absent that specific hardware condition. A separate, real
+  next step exists on the *RGB* side (spike `webeyetrack`, an existing MIT-licensed browser gaze
+  library) if accuracy improvement is still wanted. (Persona 1)
 
 **Cross-cutting triage of the 2026-07-19 Fable review** (see
 [`docs/reviews/2026-07-19-fable-review.md`](reviews/2026-07-19-fable-review.md); A1/C1 already
