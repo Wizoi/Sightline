@@ -79,11 +79,15 @@ function extractGrid(isInk, rowStart, rowEnd, colStart, colEnd) {
 // of whether a real glyph is there, merging the entire region into one
 // blob. A small run-length threshold (comfortably thicker than one staff
 // line, comfortably thinner than a real stroke) separates the two.
-function findInkBlobs(isInk, rowMin, rowMax, colStart, colEnd) {
+export function findInkBlobs(isInk, rowMin, rowMax, colStart, colEnd, opts = {}) {
   const bandHeight = rowMax - rowMin + 1;
-  const strokeNeed = Math.max(2, Math.round(bandHeight * 0.04));
-  const mergeGap = Math.max(1, Math.round(bandHeight * 0.02));
-  const minWidth = Math.max(2, Math.round(bandHeight * 0.08));
+  // Thresholds default to fractions of the band height (tuned for time-sig
+  // glyphs) but can be overridden absolutely — the measure-number locate pass
+  // needs a larger mergeGap so a multi-digit number's digits join into one blob
+  // instead of splitting. See src/lib/measureNumberLocate.js.
+  const strokeNeed = opts.strokeNeed ?? Math.max(2, Math.round(bandHeight * 0.04));
+  const mergeGap = opts.mergeGap ?? Math.max(1, Math.round(bandHeight * 0.02));
+  const minWidth = opts.minWidth ?? Math.max(2, Math.round(bandHeight * 0.08));
 
   const blobs = [];
   let start = null, lastInk = null;

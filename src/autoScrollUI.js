@@ -130,6 +130,8 @@ function renderSummary(result) {
     tempoInfo.textContent = '';
   }
 
+  renderMeasureReadings();
+
   $('autoScrollWarnings').innerHTML = result.warnings.map((w) => '<li>' + w + '</li>').join('');
 
   // More than one section means this PDF is a full score plus individual
@@ -249,4 +251,42 @@ function renderMeasuresList() {
       inp.value = v;
     });
   });
+}
+
+// When an image PDF was read two ways and they disagree (state.measureReadings),
+// offer the user a radio to switch between them. Selecting one re-slices its
+// whole-document counts into the sections and refreshes the editable list, so a
+// piece that suits the other method can be corrected in one click rather than by
+// hand-editing every wrong system.
+function renderMeasureReadings() {
+  const box = $('measureReadingsBox');
+  const opts = $('measureReadingsOpts');
+  const readings = state.autoScroll.measureReadings;
+  opts.innerHTML = '';
+  if (!readings) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  readings.options.forEach((opt, i) => {
+    const id = `reading${i}`;
+    const label = document.createElement('label');
+    label.className = 'readingOpt';
+    label.innerHTML = `<input type="radio" name="measureReading" id="${id}" ${i === readings.active ? 'checked' : ''} /> ${opt.label}`;
+    label.querySelector('input').addEventListener('change', () => {
+      readings.active = i;
+      applyReading(opt.measures);
+    });
+    opts.appendChild(label);
+  });
+}
+
+// Push a chosen whole-document count array into the active section + editable
+// list, and rebuild any in-progress schedule so the change takes effect live.
+function applyReading(measures) {
+  const as = state.autoScroll;
+  as.sections.forEach((sec) => {
+    sec.measuresPerSystem = measures.slice(sec.startSystemIndex, sec.endSystemIndex + 1);
+  });
+  const sec = as.sections[as.activeSectionIndex];
+  as.measuresPerSystem = sec ? sec.measuresPerSystem : measures.slice();
+  renderMeasuresList();
+  rebuildScheduleLive();
 }

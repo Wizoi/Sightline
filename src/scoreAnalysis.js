@@ -9,7 +9,8 @@ import {
 import { buildSections } from './lib/scoreSections.js';
 import { resolveBpmPerSystem } from './lib/tempoSchedule.js';
 import { detectTimeSignature } from './timeSigDetection.js';
-import { ocrNumberItems, terminateOcr } from './ocr.js';
+import { locateMeasureNumber } from './lib/measureNumberLocate.js';
+import { ocrNumbersByBox, ocrNumbersByStrip, terminateOcr } from './ocr.js';
 
 // Time-signature glyphs are small — at the shared analysis canvas's
 // resolution (tuned for staff-line/barline detection, not fine shape
@@ -49,6 +50,68 @@ async function renderHighResRegion(page, pageWidthPts, pageHeightPts, ah, aw, ro
   return { isInk, width, height };
 }
 
+// Reads the printed measure numbers off an image-only page (no text layer) with
+// BOTH methods, so the caller can compare them (see ocr.js's header). Renders
+// the page crisp once, then:
+//   • BOX   — for each system, LOCATE its number's tight box from ink structure
+//             (lib/measureNumberLocate.js) and OCR just that box.
+//   • STRIP — OCR the whole left margin (sparse mode) and correlate the numbers
+//             to systems by position (extractMeasureNumbers), same as the text
+//             layer.
+// systemsOnPage rows are in the ah-tall analysis space, so they're scaled to
+// this render's height. Returns { boxEntries, stripEntries }, each
+// [{ systemIndex, measureNumber }].
+const arraysEqual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+// Render a page to an offscreen white-backed canvas ~targetW px wide.
+async function renderPageCanvas(page, viewport1x, targetW) {
+  const vp = page.getViewport({ scale: targetW / viewport1x.width });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(vp.width);
+  canvas.height = Math.round(vp.height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  return canvas;
+}
+
+// The two methods have opposite resolution sweet-spots: the per-number BOX
+// method needs a crisp high-res render so a tiny number box has enough pixels,
+// while the STRIP scan reads the whole left margin better at a lower resolution
+// (higher res just feeds its layout analysis more music to misread). So each
+// gets its own render.
+const OCR_BOX_WIDTH = 2600;
+const OCR_STRIP_WIDTH = 1500;
+async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, ah) {
+  // BOX method: locate a tight box per system on the high-res render, OCR each.
+  const boxCanvas = await renderPageCanvas(page, viewport1x, OCR_BOX_WIDTH);
+  const data = boxCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, boxCanvas.width, boxCanvas.height).data;
+  const isInk = (r, c) => {
+    if (r < 0 || r >= boxCanvas.height || c < 0 || c >= boxCanvas.width) return false;
+    const i = (r * boxCanvas.width + c) * 4;
+    return data[i] + data[i + 1] + data[i + 2] < 570;
+  };
+  const rowScale = boxCanvas.height / ah;
+  const boxes = [];
+  for (const s of systemsOnPage) {
+    const box = locateMeasureNumber(isInk, {
+      systemTop: s.rowMin * rowScale,
+      staffHeight: (s.rowMax - s.rowMin) * rowScale,
+      width: boxCanvas.width,
+    });
+    if (box) boxes.push({ systemIndex: s.index, box });
+  }
+  const boxEntries = await ocrNumbersByBox(boxCanvas, boxes);
+
+  // STRIP method: OCR the whole left margin on the lower-res render, correlate.
+  const stripCanvas = await renderPageCanvas(page, viewport1x, OCR_STRIP_WIDTH);
+  const stripItems = await ocrNumbersByStrip(stripCanvas, viewport1x.width, viewport1x.height);
+  const stripEntries = extractMeasureNumbers(stripItems, systemsForText);
+
+  return { boxEntries, stripEntries };
+}
+
 // Scans the rendered score for systems (the same staff-line detection Snap
 // mode uses — src/systemDetection.js) and, for each system, estimates its
 // measure count via barline detection. This is the "Analyze score" step for
@@ -71,7 +134,9 @@ export async function analyzeScore() {
   const systemBands = [];
   const measuresPerSystem = [];
   const boundaries = [];
-  const measureNumberEntries = [];
+  const measureNumberEntries = [];       // from the PDF text layer
+  const ocrEntriesBox = [];              // OCR method BOX (per-number), image-only PDFs
+  const ocrEntriesStrip = [];            // OCR method STRIP (left-margin scan), image-only PDFs
   const tempoMarkEntries = []; // { systemIndex (global), bpm } from printed ♩=N marks
   const timeSigByIndex = {}; // global system index -> best-effort {beatsPerMeasure, noteValue, confidence}
   let knownNames = [];
@@ -176,34 +241,16 @@ export async function analyzeScore() {
       const content = await page.getTextContent();
       const pageViewport1x = page.getViewport({ scale: 1 });
       const pdfHeight = pageViewport1x.height;
-      let pageItems = content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
+      const pageItems = content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
 
       // Image-only PDFs (flattened/scanned exports) carry no text layer, so the
       // reliable printed-number path finds nothing and every system would fall
       // all the way back to the over-counting barline estimate. When a page has
-      // detected systems but no numeric text item, OCR the printed measure
-      // numbers off the rendered image instead (src/ocr.js) — lazily loaded and
-      // run only on such pages, so normal notation-software PDFs pay nothing.
-      // OCR emits the same { str, x, y } shape as the text layer, so everything
-      // downstream is identical whether numbers came from text or from OCR.
-      let usedOcr = false;
-      const hasNumberText = pageItems.some((it) => /^\d+$/.test(it.str.trim()));
-      if (!hasNumberText && systemsOnThisPage.length) {
-        setStatus('', `Reading printed measure numbers (page ${pageIdx + 1}/${numPages})…`);
-        const ocrScale = 1500 / pageViewport1x.width; // ~1500px wide: numerals legible; only the left ~1/3 is OCR'd so it stays fast
-        const ocrVp = page.getViewport({ scale: ocrScale });
-        const ocrCanvas = document.createElement('canvas');
-        ocrCanvas.width = Math.round(ocrVp.width);
-        ocrCanvas.height = Math.round(ocrVp.height);
-        const octx = ocrCanvas.getContext('2d', { willReadFrequently: true });
-        octx.fillStyle = '#fff';
-        octx.fillRect(0, 0, ocrCanvas.width, ocrCanvas.height);
-        await page.render({ canvasContext: octx, viewport: ocrVp }).promise;
-        pageItems = await ocrNumberItems(ocrCanvas, pageViewport1x.width, pdfHeight);
-        usedOcr = true;
-        usedOcrAnywhere = true;
-      }
-      if (!pageItems.length) continue;
+      // detected systems but no numeric text item, read the printed measure
+      // numbers off the rendered image instead (targeted OCR below) — only on
+      // such pages, so normal notation-software PDFs pay nothing.
+      const usedOcr = !pageItems.some((it) => /^\d+$/.test(it.str.trim())) && systemsOnThisPage.length > 0;
+      if (!pageItems.length && !usedOcr) continue;
 
       // Convert this page's systems from downsampled-canvas pixel space
       // (row 0 = top, increasing downward) to the text layer's PDF-point
@@ -250,19 +297,47 @@ export async function analyzeScore() {
         if (detected) timeSigByIndex[globalIndex] = detected;
       }
 
-      const pageMeasureEntries = extractMeasureNumbers(pageItems, systemsForText);
-      // OCR can misread a stray digit off the music; keep only the coherent,
-      // strictly-increasing set — applied per page so a multi-part score whose
-      // numbers reset per part isn't mistaken for a break. The clean text layer
-      // is already coherent, so it's used as-is.
-      measureNumberEntries.push(...(usedOcr ? filterMeasureNumberOutliers(pageMeasureEntries) : pageMeasureEntries));
-      tempoMarkEntries.push(...extractTempoMarks(pageItems, systemsForText));
+      if (usedOcr) {
+        // Image page: read the printed measure numbers off the render with BOTH
+        // methods (per-number box + left-margin scan), kept separate so the two
+        // can be compared after the loop. Each is filtered per page to the
+        // coherent, strictly-increasing set, so an OCR misread can't corrupt a
+        // count worse than the barline fallback (and a multi-part score's
+        // per-part number reset isn't mistaken for a break). Section titles /
+        // tempo words / time-sig digits aren't text here, so nothing else to read.
+        usedOcrAnywhere = true;
+        setStatus('', `Reading printed measure numbers (page ${pageIdx + 1}/${numPages})…`);
+        const { boxEntries, stripEntries } = await ocrPageNumbers(page, pageViewport1x, systemsOnThisPage, systemsForText, ah);
+        ocrEntriesBox.push(...filterMeasureNumberOutliers(boxEntries));
+        ocrEntriesStrip.push(...filterMeasureNumberOutliers(stripEntries));
+      } else {
+        // Text-layer page: read the real printed numbers + tempo marks directly.
+        measureNumberEntries.push(...extractMeasureNumbers(pageItems, systemsForText));
+        tempoMarkEntries.push(...extractTempoMarks(pageItems, systemsForText));
+      }
     } catch (e) { /* no text layer + OCR unavailable/failed — pixel detection above is unaffected */ }
   }
 
   if (usedOcrAnywhere) await terminateOcr(); // free the OCR worker thread + model
 
-  const refinedMeasures = refineMeasureCounts(measuresPerSystem, measureNumberEntries);
+  // Measure counts. For text-layer PDFs there's one reading. For image PDFs the
+  // two OCR methods each yield one; default to whichever read more systems, and
+  // when they disagree keep the other as a switchable alternative (some
+  // engravings suit one method, some the other — the user decides).
+  let refinedMeasures;
+  let readings = null;
+  if (usedOcrAnywhere) {
+    const box = { label: 'Per-number', measures: refineMeasureCounts(measuresPerSystem, ocrEntriesBox), coverage: ocrEntriesBox.length };
+    const strip = { label: 'Margin scan', measures: refineMeasureCounts(measuresPerSystem, ocrEntriesStrip), coverage: ocrEntriesStrip.length };
+    const ordered = strip.coverage > box.coverage ? [strip, box] : [box, strip];
+    refinedMeasures = ordered[0].measures;
+    if (!arraysEqual(ordered[0].measures, ordered[1].measures)) {
+      readings = { options: ordered.map((o) => ({ label: o.label, measures: o.measures })), active: 0 };
+    }
+  } else {
+    refinedMeasures = refineMeasureCounts(measuresPerSystem, measureNumberEntries);
+  }
+  state.autoScroll.measureReadings = readings;
 
   // Collapse the printed ♩=N marks into one tempo per system (first mark on a
   // system wins; carried forward from there). Only build a bpmPerSystem when
@@ -320,5 +395,6 @@ export async function analyzeScore() {
   return {
     systemCount: systemBands.length, measuresPerSystem: refinedMeasures, warnings,
     sections: state.autoScroll.sections, tempoSequence, usedOcr: usedOcrAnywhere,
+    measureReadings: readings,
   };
 }

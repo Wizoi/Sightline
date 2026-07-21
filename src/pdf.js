@@ -76,6 +76,7 @@ function resetAutoScrollAnalysis() {
   as.analyzed = false;
   as.systemBands = [];
   as.measuresPerSystem = [];
+  as.measureReadings = null;
   as.sections = [];
   as.activeSectionIndex = 0;
   const hl = $('autoScrollHighlight');

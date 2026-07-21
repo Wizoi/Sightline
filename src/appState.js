@@ -78,6 +78,11 @@ export const state = {
     analyzed: false,             // has "Analyze score" run for the current PDF?
     systemBands: [],             // [{ page, fracCenter, fracMin, fracMax }] per system — page-relative, from scoreAnalysis; resolved to doc px at use time via systemGeometry.js so they survive resize/zoom/rotation
     measuresPerSystem: [],       // editable estimate, one entry per system
+    // When an image-only PDF is read two ways (OCR per-number vs margin scan)
+    // and they disagree, both whole-document count arrays are kept here so the
+    // user can switch — { options: [{ label, measures }], active } | null. See
+    // scoreAnalysis.js / autoScrollUI.js.
+    measureReadings: null,
     beatsPerMeasure: 4,
     bpm: 100,                    // manual Tempo slider — also the fallback tempo for pieces with no printed ♩=N marks
     // Per-system tempo from printed metronome marks (♩=N), one entry per
