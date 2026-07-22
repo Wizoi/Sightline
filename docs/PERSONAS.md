@@ -420,6 +420,158 @@ surface as more than a declined "no suggestion"):**
   then gate behind a confidence threshold that's allowed to show nothing" as the default shape for
   any future best-effort detector in this domain, not just this one.
 
+**Wrong-`/Rotate`-flag self-correction (2026-07-21, real user corpus at `D:\sheetmusic`):**
+- **Some source PDFs carry a genuinely wrong `/Rotate` flag on individual pages — a scanning/
+  assembly artifact, not a hypothetical.** Confirmed on two real combined-score PDFs: a normal
+  portrait page (readable title, horizontal staves at rotation 0) instead declares `/Rotate 270`.
+  Sightline's rendering trusted `page.rotate` unconditionally everywhere it called
+  `page.getViewport()` with no explicit `rotation` (`pdf.js` `renderAll()`; `scoreAnalysis.js`'s
+  main detailed pass, the text-layer `pdfHeight` viewport, the OCR renders, the time-sig high-res
+  re-render) — so the wrongly-declared page rendered sideways both on screen and for analysis,
+  feeding vertical-staff pixels into the horizontal-ink-run staff-line scanner and producing
+  nonsense measure counts (1-49 on a march) on just that page.
+- **Fix: an unconditional per-page orientation probe, not a conditional retry gated on "looks
+  wrong."** The failure mode doesn't fail cleanly — a wrongly-rotated page still detects a *few*
+  garbage systems, not zero — so there's no reliable downstream signal to gate a retry on.
+  Instead, every page is rendered at all 4 absolute rotations (`getViewport({ scale, rotation })`
+  — this *overrides* `page.rotate`, it doesn't add to it) at a small fixed low resolution (~220px
+  long edge, ~30x fewer pixels than the shared ah=1200 detailed-pass canvas), scored by the exact
+  same signal already used for real staff-line detection (count of rows with a long horizontal ink
+  run — `scoreOrientation`/`chooseRotation` in `lib/pageRotation.js`). The declared rotation is
+  overridden only when the best-scoring candidate both clears an absolute floor (rejects a blank/
+  cover/text-only page with no music in *any* rotation) and convincingly beats the declared
+  rotation's own score by a ratio (rejects flip-flopping a page whose declared rotation is already
+  correct). The resolved rotation is threaded through *every* subsequent render for that page
+  (detailed pass, text-layer viewport, OCR renders, time-sig re-render) and also consulted by
+  `pdf.js`'s `renderAll()` so the visible canvases match what was analyzed — `autoScrollUI.js`
+  triggers one extra `renderAll()` after Analyze if any override was newly set.
+- **Both thresholds were calibrated against real dumped scores, not guessed, and the first guess
+  (floor=40) was wrong.** A placeholder floor of 40 passed 2 of 3 real target pages but silently
+  missed the third (MonogramMarch p.5, a sparser continuation page whose real signal was only 29)
+  — caught by instrumenting the actual per-rotation scores during Playwright-driven verification
+  rather than trusting the "looks reasonable" guess. Real numbers that set the final floor=15,
+  ratio=3: genuine wrong-rotation pages scored 89 (Teutonia p.3), 57 (MonogramMarch p.4), and 29
+  (MonogramMarch p.5, the tightest real margin found); blank/cover-page noise topped out at 6
+  (Teutonia p.1); and the regression-guard file ("Fat Burger parts with drums" — all 41 pages
+  declare `/Rotate 270` and genuinely need it, real negative control) scored surprisingly low
+  even in its own *correct* orientation (at most 8) since its individual-part pages are sparser
+  than the two combined scores — floor=15 sits with real margin above that 8 and real margin below
+  the tightest genuine 29. **General lesson, same discipline as the `minFrac`/`pad` precedents
+  above: dump the actual scores from a real corpus before picking a threshold, and re-check every
+  real target case individually — a threshold that passes most of a corpus can still silently
+  miss one, exactly as it did here on the first pass.**
+- **A pure horizontal-ink-run signal cannot distinguish right-side-up from upside-down (or,
+  equivalently for a landscape-stored page, rotation 90 from 270) — a staff's lines are
+  horizontal either way.** Observed directly on the real regression-guard file: its 90 and 270
+  candidate scores were frequently equal or within 1-2 of each other. Not a problem in practice
+  for the confirmed real cases (both broken files declare 270, never 90/180, and the floor keeps
+  this noise well below any override threshold), but a real, documented limitation of the metric,
+  not fixed by this change — ties are broken toward the smaller rotation value (prefers 0 over
+  180) as a reasonable default given the real data, not a proof it's always right.
+- **Verified via the actual running app (Playwright + system Chrome against the Vite dev server),
+  not just synthetic unit tests, including a direct git-stash before/after comparison against the
+  real regression-guard file** — its 41-page, 231-system measure-count output was byte-for-byte
+  identical before and after the whole change, confirming the fix is a true no-op whenever no
+  override fires (passing the same `rotation` value as the page's own declared `page.rotate`
+  produces identical output to not passing `rotation` at all).
+
+**Two more real bugs found and fixed via a 39-file real-corpus sweep (2026-07-21, reading actual
+rendered results, not just synthetic fixtures) — both in the section-splitting pipeline:**
+- **Bug: the section-title tempo gate only recognized word-based markings ("Andante"), never a
+  bare printed metronome mark.** `findSectionTitle()`'s gate required `findTempoMarking()` (the
+  `TEMPO_WORDS` vocabulary) to match before it would recognize ANY page as a section start — but
+  `extractTempoMarks()` already had a separate, working numeric-mark regex (`= *(\d{2,3})`) for a
+  different purpose (BPM resolution) that the gate never consulted. This silently broke section-
+  splitting on an entire real 8-file IMSLP trio-score folder ("Potential clarinetflute duets" +
+  its Melancholic subfolder): every one of them prints only "♩ = 127"-style marks, never an
+  Italian word, so `findSectionTitle` rejected every part-title page even though every OTHER
+  condition (a known instrument name at the left margin) was met — confirmed by dumping the real
+  text layer and finding literally every other signal present. The one real file in the whole
+  corpus that already split correctly (JugglingClowns) only worked because it happens to print
+  "Andante". **Fixed** by sharing the regex (`TEMPO_MARK_RE`, exported implicitly via a new
+  `hasTempoMarking()` that accepts either signal) rather than duplicating it — `scoreText.js`.
+  Verified: all 8 real trio files (+ Melancholic) now split into real instrument-named sections;
+  JugglingClowns unchanged (regression guard, confirmed byte-for-byte via git-stash A/B); several
+  genuinely single-part files (`randomclarinet/`) spot-checked to confirm nothing spuriously
+  splits.
+- **Bug: no section-boundary signal at all when there's no combined-score bootstrap page — and
+  this actively corrupted measure counts for every part after the first, not just naming.** The
+  "Full band arrangements" folder (Teutonia, MonogramMarch, Fat Burger, KingCotton, Fantastic
+  Parade — scanned individual-part booklets whose page 1 is a library cover sheet, not a combined
+  score) never had any name for `findSectionTitle` to match against, so it never split at all —
+  previously documented as "a real, accepted limitation." Turned out to be worse: measure-count
+  refinement (`filterMeasureNumberOutliers` + `refineMeasureCounts`) ran ONCE, globally, across
+  the whole flat system list. When part 2 restarts at measure 1, every one of its real,
+  correctly-read numbers is *smaller* than part 1's, so the longest-strictly-increasing-subsequence
+  logic in `filterMeasureNumberOutliers` discarded them as "outliers," and `refineMeasureCounts`'s
+  own `total <= 0` defensive check separately skipped the negative-delta boundary system — between
+  the two, every system from a reset onward fell back to the raw (often wildly wrong) barline/OCR
+  estimate, which is what actually produced the extreme "1-71 measures" style warnings on these
+  files, not a cosmetic naming gap.
+  - **Fix, part A:** a printed measure number *resetting* (going down) is itself a real,
+    title-independent section-boundary signal — new `detectMeasureNumberResets()` in
+    `scoreText.js`, fed into `analyzeScore()`'s existing `boundaries` list alongside title matches
+    (nameless; `buildSections()` already falls back to `Section N` — see below). Detected from
+    whichever of the three raw entry sources (text-layer, OCR-box, OCR-strip) has the *most* data
+    points, independent of which source is later chosen to fill in the actual numbers — needed
+    because one real file (Teutonia) turned out to be a MIXED document: most pages have no
+    extractable text (OCR path), but a few genuinely do, and that handful was both richer and
+    where the only clean, confidently-read reset showed up. The old logic discarded
+    `measureNumberEntries` entirely whenever *any* page fell back to OCR.
+  - **Fix, part B:** `analyzeScore()` now builds sections from the RAW (unrefined) per-system
+    estimate first, then runs `filterMeasureNumberOutliers` + `refineMeasureCounts` SEPARATELY per
+    section (entries re-based to section-local indices) and stitches the refined slices back
+    together — so a part's own numbers never bleed into a neighbor's. A welcome side effect,
+    unplanned but free: re-basing to section-local indices means each part's own first system now
+    implicitly anchors at measure 1 too (`refineMeasureCounts` already did this for global system
+    0), fixing the "no printed 1 on the opening system" gap for every part, not just the document's
+    first.
+  - **A real bug in `buildSections()` surfaced immediately during verification:** its name
+    fallback was `boundary ? boundary.name : defaultName` — but a nameless reset boundary is a
+    real, truthy object with `name: null`, so sections literally rendered with the name `"null"`
+    instead of falling back to `Section N`. Fixed to `(boundary && boundary.name) ? ... : ...`.
+    Caught by actually reading the rendered Sections list, not by reasoning about the code.
+  - **A second real bug surfaced by the SAME verification pass, unrelated to either bug above:**
+    accepting numeric tempo marks (part A above) made section-splitting active on a real 20+-
+    instrument conductor's score ("The Fantastic Parade") that had never split before (no word
+    marking, so the old gate always rejected it) — and its compact left-margin layout puts each
+    instrument's own time-signature digits at nearly the same y as that instrument's name label,
+    so `groupIntoRows` (correctly, by its own merge rules) merged them into one row, producing
+    garbage "known names" like `"6 J"` or `"b J"` (a stray music-font glyph decoding to an
+    ordinary letter — the same class of surprising glyph-decode already documented on
+    `groupIntoRows` itself, just colliding with a different row this time). Those short, pure-noise
+    fragments then re-matched themselves on every later page where the same layout collision
+    repeated, producing a flood of ~20 garbage-named micro-sections. **Fixed** by requiring a real
+    run of letters (`hasRealNameShape`, >= 2 consecutive) in `collectKnownNames` — rejects the
+    pure-noise fragments while keeping every real label (including short abbreviated ones like
+    "B Cl. 1", "A.Cl."); a compound row that still has a real prefix ("Oboes 8 J") is kept as a
+    lesser-harm tradeoff rather than chased further, since a real prefix is far less likely to
+    spuriously re-match a later page verbatim than a pure-noise fragment is.
+  - **A third, more diffuse quality issue found via the same corpus sweep, this time in
+    `detectMeasureNumberResets` itself:** OCR/text-extraction noise doesn't just misread a single
+    digit — on one real file ("A Lazy Summer Day") some other printed content (almost certainly
+    not a measure number at all) got picked up as the SAME wrong small number ("2") across several
+    *consecutive* systems, and each one independently looked exactly like a valid small-restart
+    drop, fragmenting one real part into several bogus generic sections. **Mitigated** (not fully
+    solved — see below) by requiring the very next reading, if any, to genuinely be greater than
+    the drop (real numbering resumes climbing; a flatlined repeat never does). This is a real,
+    verified improvement (confirmed the worst files' section counts dropping substantially: 10→8,
+    17→10, 5→2) but **not airtight** — a truly isolated one-off misread immediately followed by a
+    real, further-climbing number can still slip through, and one real file in the corpus (a
+    Lazarus duets collection with especially poor, near-random-looking OCR readings throughout —
+    values oscillating 0/3/4/5/6/7 with no real coherent climbing signal at all) still over-splits
+    into 10 sections. This is a data-quality ceiling, not a design flaw in the detector: no
+    heuristic on top of fundamentally noise-dominated input will reliably separate "real reset"
+    from "misread" in every case. Consistent with this project's established "surfaced for review,
+    not silently wrong" pattern — the sections list is visible and user-editable, so an over-split
+    result is at worst a visible annoyance, not silent corruption.
+  - **Verified against the full 39-file real corpus** (not just the target folders) before and
+    after each incremental fix, confirming: every genuinely single-part file still shows no
+    sections; every previously-working named-section file (JugglingClowns, the whole Potential-
+    clarinetflute-duets folder) keeps its real names unchanged; every "Full band arrangements" file
+    now shows 2-3 sections (down from 0) where OCR data quality permits, with per-section measure
+    counts that no longer bleed across a part boundary.
+
 **Open questions / future research:**
 - **Mid-section time-signature changes are now a confirmed real case, not a hypothetical.** A
   real test piece's Alto Clarinet part changes meter almost every measure (5/8, 7/8, 3/4, 4/4,
@@ -432,6 +584,16 @@ surface as more than a declined "no suggestion"):**
   the system on the page — sidesteps needing an exact time-signature value at all, and lets a
   user directly see/correct the number actually driving playback. Not yet built; revisit here
   once a direction is chosen.
+  **Backlog note (2026-07-22), not yet researched — the open question to answer FIRST, before any
+  UI work on this:** whether showing a scheduled duration per system actually lets a student
+  self-correct drift as well as a single BPM number does for the common (single-tempo) case. A BPM
+  slider is a single, familiar, already-internalized unit a band student can compare against a
+  metronome or their own count; a per-system duration overlay is a new unit (seconds-until-next-
+  system) with no existing mental model to anchor it to, and it's not yet established whether it's
+  actually easier or harder for this persona's audience to use for real-time drift-correction during
+  a performance. Don't start on the overlay's UI/rendering until this is answered — a good spike
+  would be a low-fidelity mockup/paper-prototype check with a real student trying to keep pace off a
+  duration number vs. off a BPM number, not a code prototype.
 - Repeat signs / codas / D.S. al Fine and their effect on auto-scroll's linear schedule — out of
   v1 scope, unaddressed.
 - ~~Whether note-head density could refine the "assume uniform note values" approximation~~ —
@@ -447,11 +609,166 @@ surface as more than a declined "no suggestion"):**
 - Bundling or rendering real music-engraving-font reference glyphs (vs. a generic system font) for
   time-signature digit matching — the specific next step that would make that detector reliable
   enough to activate, if picked back up.
-- A PDF that's *only* individual parts with no combined full score first has no bootstrap page to
-  collect known instrument names from, so its parts won't be auto-split into sections — untested
-  how common this is for the real target audience's typical downloads (see Music Educator
-  persona); may be worth a fallback (e.g. bootstrap from *any* page's repeated title pattern, not
-  just page 1) if it turns out to be common.
+- ~~A PDF that's *only* individual parts with no combined full score first has no bootstrap page to
+  collect known instrument names from, so its parts won't be auto-split into sections~~ --
+  **partially addressed (2026-07-21):** it now still splits, via the title-independent printed-
+  measure-number-reset signal (`detectMeasureNumberResets`) instead of instrument names, just with
+  generic `Section N` names rather than real ones. Real instrument names for this case would still
+  need a different bootstrap source than page 1 (e.g. each part's own title page, read
+  independently) — not attempted, since the generic-name fallback already fixes the more serious
+  half of this gap (measure counts no longer bleeding across an undetected part boundary).
+
+**Four more findings closed via a follow-up backlog pass (2026-07-22), covering the same 39-file
+real corpus plus four new committed regression tests — verified with real before/after evidence
+per finding, not just an aggregate "all fixed":**
+
+- **Finding 1 (biggest, most uncertain going in): system-detection under/over-grouping on real
+  scanned single-staff booklets, root-caused rather than threshold-tuned.** Dumped the actual
+  `gaps` array feeding `kmeans2()` (see the Applied Mathematician persona) for real affected pages
+  before touching any code, per this backlog's explicit instruction. The real data showed the
+  under-grouping symptom ("Full band arrangements" folder: 6-7 real solo staves merging into 1-2
+  detected systems) was **not** noisy-gap-statistics at all — it was a genuine logic bug in
+  `pageSystemsDetailed()`'s consistency check: `modeSize > 1 && best >= grp.length - 1` ("tolerate
+  at most one non-conforming group") is **mathematically vacuous whenever there are exactly 2
+  groups** — `best` (the larger of two counts) is always `>= 1` out of 2, so the check can never
+  reject a 2-way split no matter how mismatched the two group sizes are. A real page from
+  `Teutonia.pdf` (an individual-part scanned booklet with **no real bracing anywhere in the
+  document**) showed exactly this: gaps of mostly ~90-125 plus one much larger outlier (a
+  scan/binding irregularity, not a real system-vs-staff boundary), which `kmeans2` correctly called
+  "bimodal," splitting 7 solo staves into 2 groups of sizes 3 and 4 — accepted as "consistent"
+  purely because `grp.length - 1 == 1 == best`, wrongly merging unrelated solo staves into 2 fake
+  multi-staff systems and directly producing the "1-49 measures" warning range a user would see.
+  **Fixed** by special-casing `grp.length === 2` to require `best === 2` (both groups must actually
+  match) instead of the vacuous "at most one off" rule, which provides zero discriminating power at
+  n=2 — the `>= 3`-group case (already verified safe against the real 13-page braced-quartet file,
+  see the "tolerates a staff with only 2 of 5 lines detected" fix above) is completely untouched.
+  The mirror symptom described in this backlog ("1 real braced system splitting into ~14" on a
+  dense conductor's score) turned out, on inspection of the real `Fantastic Parade.pdf` dump, to be
+  a `grp.length >= 5` case, not a `grp.length === 2` one — a page with a real, consistent 3-staff
+  bracing pattern occasionally lost a staff entirely on 1-2 systems (0 detected lines, not just a
+  thin one), producing local group sizes of 2 instead of 3 on more than one group at once, which
+  the existing "tolerate at most one" rule correctly (by its own already-verified design) refuses
+  to paper over — this is the same "a dropped staff's damage isn't contained to its own system"
+  category already documented above, not evidence of a second bug, and is left as an open staff-
+  detection-density gap rather than loosened further (loosening the *grouping* tolerance to paper
+  over a *detection* gap risks silently re-accepting genuinely inconsistent pages, which this
+  project's conservative-by-design philosophy explicitly rejects — see the existing "falls back to
+  per-staff" rationale a few paragraphs above). **Verified with a real git-stash-style before/after
+  A/B across 14 real files** (temporarily reverting just this one line, re-running the identical
+  Playwright-driven batch, restoring it): the 4 affected "Full band arrangements" files all gained
+  real, plausible additional systems (Teutonia 63→80, MonogramMarch 141→158, KingCotton 193→208,
+  Fat Burger 231→261 — all previously-merged solo staves correctly split apart), while all 10 other
+  real files spanning clean vector scores, a braced clarinet quartet, a dense 20+-instrument
+  conductor's score, solo clarinet pieces, and IMSLP trio scores were **byte-for-byte unchanged** —
+  a real, clean regression guard, not just "looks plausible." Two new committed unit tests in
+  `systemDetection.test.js` encode the real gap shapes from both the buggy-merge case and a
+  legitimate-2-system case directly (not just abstract numbers), so this exact bug class can't
+  silently regress.
+
+- **Finding 2: the numeric-tempo-mark section-title gate (`findSectionTitle`) over-triggered on
+  Score CONTINUATION pages, not just genuine new-part title pages.** Root cause exactly as
+  diagnosed in the backlog: `collectKnownNames()` returned one flat list of strings mixing an
+  instrument's FULL name (printed once, beside its very first system) with its ABBREVIATED
+  recurring form (printed on every system/page after) — with no way for a caller to tell which was
+  which. A mid-Score continuation page legitimately shows the abbreviated label at the left margin
+  on EVERY page, plus (after the numeric-tempo-gate fix from the prior backlog pass) the Score's
+  own restated numeric tempo mark — both real signals, but present on every continuation page, not
+  just a genuine new section start. **Fixed** by having `collectKnownNames` return `{ text, isFull
+  }` pairs — `isFull` is true only for a label whose row sits within (or up to `pad` above) system
+  0's own vertical band (where every instrument's FULL name is printed, stacked at its own staff's
+  y but all still inside that one braced system), false for a label below it (beside a LATER
+  system, always the abbreviated form). `findSectionTitle` now only accepts an `isFull` match as a
+  boundary trigger. **Verified with real before/after evidence on 3 real "Score and Parts"-style
+  IMSLP trio files** (temporarily reverting just the `isFull` filter, same A/B methodology as
+  Finding 1): all 3 files (`The Spanish Winds Trio`, `The Cuban Dancer Trio`, `My Happy Life`)
+  dropped from one spurious extra section to the correct count (5→4, 5→4, 6→5), **and**, as a
+  striking bonus that wasn't anticipated going in, the tempo-changes banner went from completely
+  EMPTY to showing the piece's real tempo change in all 3 cases — the old spurious split had been
+  truncating the first (now-active) section's own system range before it ever reached the system
+  where the real printed tempo change occurred, so Finding 2's bug was silently breaking Finding 4's
+  feature too on these exact files, discovered only by running the real corpus, not reasoned about
+  in advance.
+
+- **Finding 3: `refineMeasureCounts` picked one measure-number source (text-layer vs. OCR) for the
+  WHOLE document even when a specific section had a strictly better source available.** Root cause
+  matched the backlog's diagnosis exactly: `usedOcrAnywhere` was a single whole-document switch — if
+  ANY page needed OCR, the real PDF text-layer entries (`measureNumberEntries`) were discarded
+  entirely for the whole final measure-count computation, even for the handful of pages that had
+  perfectly good real text. **Fixed**, more surgically than "choose per section": since a given
+  system's page takes EITHER the OCR path OR the real-text path in the per-page loop (never both —
+  confirmed directly from the code, not assumed), `measureNumberEntries` can be safely merged into
+  BOTH OCR candidate arrays (`[...measureNumberEntries, ...ocrEntriesBox]` and
+  `[...measureNumberEntries, ...ocrEntriesStrip]`) before the existing per-section refinement runs
+  — no new plumbing needed, and no risk of the two sources ever conflicting for the same system.
+  **Verified with a real before/after diff on `Teutonia.pdf`** (the one real file in the corpus
+  already documented as a mixed text/OCR document): 4 of the active section's 6 systems changed
+  from clearly-inflated OCR-only estimates (7, 8, 12, 15) to smaller, far more plausible merged
+  values (5, 6, 6, 6) once the real text-layer numbers were allowed to contribute.
+
+- **Finding 4: the tempo-change banner (`autoScrollTempoInfo`) was computed from the
+  whole-DOCUMENT `tempoSequence`, not the active section's own.** On a multi-part file where every
+  part reprints the same tempo structure, a normal "speeds up once, slows down once" piece looked
+  like it oscillated once per part. **Fixed** by extracting a small pure helper,
+  `tempoSequence(bpmPerSystem)` (`lib/tempoSchedule.js`), and having `autoScrollUI.js` call it with
+  the ACTIVE SECTION's own `bpmPerSystem` slice (already computed and stored per section) instead of
+  a whole-document array computed once in `scoreAnalysis.js` — recomputed on every section switch
+  (`selectSection`), not just once at Analyze time. Display-layer fix only, exactly as scoped; no
+  detection logic changed. Directly confirmed correct via Finding 2's real-corpus verification above
+  (each trio file's banner now shows its own section's real, single tempo change instead of nothing
+  or a repeated/confusing sequence).
+
+**Phase 1 (foundational) work done alongside the four findings above:**
+- **`analyzeScore()`'s ~360-line post-page-loop composition logic extracted into
+  `src/lib/scoreAssembly.js`** — `pickPrimaryEntries`, `addMeasureNumberResetBoundaries`,
+  `resolveTempoSchedule`, `refineMeasuresPerSection`, `chooseMeasureReadings`, `computeWarnings`, all
+  pure and DOM/canvas-free, each with its own dedicated unit tests (17 new tests) — exactly the
+  composition layer this project's own history flags as where real bugs slip through (a
+  `buildSections()` name-fallback bug, a bootstrap-page self-match bug, both already documented
+  above as caught by manual inspection rather than a test). **Verified behavior-preserving, not just
+  "looks equivalent"**: ran the full `npm test` suite (272 tests, all passing) plus a real-corpus
+  byte-for-byte diff of the same 11-file Playwright batch before and after the extraction — the only
+  differences found were from the already-separately-verified Phase 3 UX change (the
+  "— auto-detected split" section-name suffix, see the Music Educator persona below), not from the
+  refactor itself. The per-page rendering/detection loop (staff-line scanning, barline counting, the
+  rotation probe) deliberately stays inline in `scoreAnalysis.js` — see the fixture-testing decision
+  immediately below for why.
+- **Fixture-testing technical decision (the explicitly-flagged-uncertain part of this backlog):**
+  confirmed directly (not assumed) that this project has **no `canvas` npm package and no jsdom**
+  installed — plain Node, `document`/`canvas` genuinely undefined — and that Vitest's `environment`
+  is unset in `vite.config.js`. Rather than add native `canvas` bindings as a new permanent
+  devDependency (real Windows-native-build-friction risk for every future contributor, and this
+  project's QA persona already treats Playwright-driven rendering as deliberately **ad hoc,
+  session-only verification, never committed test infra** — no `e2e/` directory, no Playwright
+  dependency in `package.json`, no CI job), the chosen split is:
+  - **Pixel/canvas-rendering-dependent logic** (staff-line/barline detection, the rotation probe's
+    per-orientation ink scoring) stays tested exactly where it already was: pure functions
+    (`pageSystemsDetailed`, `estimateMeasureCount`, `scoreOrientation`/`chooseRotation`) fed literal
+    row/ink-function arrays in their own `*.test.js` files — including the two new Finding-1
+    regression tests added directly from real corpus-dumped gap data.
+  - **Real-PDF-text-layer-dependent logic** gets a genuinely new capability: `pdf-lib` (pure JS, zero
+    native dependencies, added as a devDependency) builds real PDF byte streams **in memory at test
+    time** — not committed as static `.pdf` binary files, specifically because this repo's
+    `.gitignore` has a deliberate blanket `*.pdf` rule whose entire purpose is making it structurally
+    hard to ever accidentally commit the user's real copyrighted sheet-music collection; carving out
+    an exception for a fixtures folder would be a real, if narrow, weakening of that safety net for
+    no real benefit over generating the bytes at test time. The resulting bytes are fed straight into
+    `pdfjs-dist/legacy/build/pdf.js` (already a project dependency) via `getDocument({ data: bytes
+    })` — confirmed this runs correctly in plain Node with **zero canvas dependency** for anything
+    that doesn't call `page.render()`: `page.rotate`, `page.getViewport()`, and, critically,
+    `page.getTextContent()` (the actual call `scoreAnalysis.js` makes) all work against the REAL
+    pdfjs parsing pipeline (real xref table, real content streams, real font/glyph decoding) with
+    only two harmless console warnings (DOMMatrix/Path2D polyfill, standard-font-data fetch — both
+    about rendering/metrics machinery text-position extraction never touches). New committed file
+    `src/lib/realPdf.fixtures.test.js` (6 tests) exercises `groupIntoRows` / `collectKnownNames` /
+    `findSectionTitle` / `extractMeasureNumbers` / `detectMeasureNumberResets` end-to-end against
+    genuinely-parsed real PDFs covering exactly the three structural conditions this backlog named:
+    a numeric-tempo-only multi-part title page (plus the real Finding 2 continuation-page rejection,
+    both against the SAME fixture), a no-combined-score booklet with a mid-document measure-number
+    reset, and a page whose declared `/Rotate` doesn't match a plain assumption about its content.
+    Where a test needs to know "which systems are on this page" (real code gets that from the pixel
+    pass this file doesn't exercise), it uses an explicit, clearly-commented SYNTHETIC
+    `systemsForText`-shaped array positioned to match where the fixture's own text was drawn —
+    honest about the one seam this approach doesn't reach, not a silent gap.
 
 ---
 
@@ -808,6 +1125,45 @@ run-through case the current schedule already handles.
   recording, not synthetic input, to answer honestly (the same "verify against real data" discipline
   as the OMR persona's barline/measure-number fixes).
 
+**Whole-app health review (2026-07-22): the recent 39-file real-corpus sweep (rotation-flag
+correction, numeric-tempo section titles, measure-number-reset boundaries — see OMR persona) is
+exactly the right kind of validation for this audience, and surfaces one new UX-facing risk worth
+tracking rather than treating as purely an OMR-internal detail.**
+- **Endorsement, not just a technical note: the corpus itself (a real user's own high-school/
+  community-band collection — marches, IMSLP trio arrangements, anime sheet music, solo clarinet
+  pieces) is a meaningfully better test signal than hand-picked hard cases, because it's the actual
+  shape of what this audience owns and plays** — individually-rotated scanned booklet pages, parts
+  with only a numeric metronome mark and no Italian tempo word, library-cover-sheet first pages
+  with no combined score to bootstrap instrument names from. Recommend this stays the default
+  review practice for any future detection tuning in this app, not a one-off.
+- **New risk to watch: generic `Section N` names (the fallback when a part has no combined-score
+  bootstrap page) combined with the still-open over-splitting failure mode on noisy OCR** (the
+  "Lazarus duets" case in the OMR persona's write-up, over-splitting into ~10 sections from
+  oscillating misreads) **is a real control-panel-clarity risk, not just a data-quality footnote.**
+  A student opening the Tempo tab mid-warm-up to a list of 10 meaninglessly-numbered sections for
+  what is, to them, just "my one clarinet part" is the same class of failure already flagged above
+  for a cluttered/confusing panel — the harm isn't silent wrong output, it's a confusing choice
+  surface at exactly the moment (mid-warm-up) this audience won't debug it. Doesn't need OMR-side
+  fixing first; a UI-side mitigation (e.g. collapsing/hiding the section picker entirely when there's
+  only one real section, or visually de-emphasizing low-confidence generic-named sections) would
+  contain the damage even before the underlying OCR-noise ceiling improves.
+  **Built (2026-07-22):** went with de-emphasizing rather than hiding — a blanket "hide whenever any
+  section is generic" rule would have thrown away real value on the common, legitimately-useful case
+  (a "Full band arrangements" file with 2-3 real generic sections from clean measure-number resets,
+  which the same corpus sweep confirmed is a working, valuable split even with no real instrument
+  names attached to it — see the OMR persona's Finding 1 write-up for real system counts on those
+  exact files). `buildSections()` (`lib/scoreSections.js`) now tags each section `genericName: true`
+  only for the numbered `Section N` fallback (explicitly NOT for the `i===0` "Score" default, which
+  is a meaningful label on its own) and the sections dropdown (`autoScrollUI.js`) appends
+  "— auto-detected split" to a generic section's own option text, so a student sees a plain visual/
+  textual cue that this particular split point is an approximation, not an authoritative label —
+  without hiding or removing any of its own (still real, still useful) per-section measure counts.
+- **No new hands-off-instrument interaction risk from any of this work.** Rotation correction and
+  section splitting are both pre-processing (run during "Analyze," before the student ever picks up
+  the instrument) — they don't touch the pedal/spacebar/wink control surface at all, so the "hands
+  stay on the instrument mid-piece" bar this persona is most protective of is untouched by this
+  round of work.
+
 **Open questions / future research:**
 - No current handling for **duet/ensemble parts with cues** (small cue notes from another
   instrument) — unclear how they'd interact with barline-based measure counting; likely fine
@@ -976,13 +1332,39 @@ not just plausible-looking.
   available for a feature under development, prioritize testing against it directly, early —
   don't treat it as a nice-to-have final check after synthetic tests pass.
 
+- **A new committed pattern (2026-07-22): `pdf-lib` (pure JS, zero native deps, now a
+  devDependency) builds real PDF byte streams in memory at test time, parsed by the real
+  `pdfjs-dist` pipeline — genuine committed regression coverage for text-layer-dependent logic,
+  without needing the ad hoc `canvas` install this section previously relied on.** Confirmed
+  `page.rotate`, `page.getViewport()`, and `page.getTextContent()` all work with **zero canvas
+  dependency** in plain Node — only `page.render()` (actual pixel rendering) needs canvas/jsdom,
+  which this project still deliberately doesn't add (see the OMR persona's Phase 1b write-up for
+  the full reasoning). This closes part of the gap this section flagged below (no committed
+  regression corpus) for the text-layer half of detection, without opening the door to committing
+  real user sheet-music PDFs: fixtures are generated in-memory, never written to disk or committed
+  as binary files, specifically so this repo's blanket `*.pdf` `.gitignore` rule (guarding against
+  ever accidentally committing the user's real, copyrighted personal collection) never needs an
+  exception. See `src/lib/realPdf.fixtures.test.js` for the concrete pattern — reuse it for any
+  future text-layer-dependent detection work rather than re-deriving hand-typed `{str, x, y}` item
+  arrays, which can't catch a real pdfjs API-shape regression the way a real parsed PDF can.
+- **The `pageSystemsDetailed`/`kmeans2` gap-clustering logic got a second real-corpus-verified fix
+  (2026-07-22, see OMR persona Finding 1) using the same "dump real data before touching code"
+  discipline as the `collapseThickness`/`pad=20`/`minFrac` fixes above** — the recurring thread
+  across every real detection bug fixed in this project so far: a threshold or consistency-check
+  that looks reasonable in isolation can still be provably wrong (here, mathematically vacuous at
+  one specific group-count) or silently miscalibrated, and the only way to find out is to look at
+  the actual numbers a real file produces, not to reason from the code alone.
+
 **Open questions / future research:**
 - No current corpus of real (redacted/public-domain) band-part PDFs for regression testing
   detection accuracy over time — tests use generated fixtures, plus the one real user-provided
   file used ad hoc for the sections feature (see above). Worth considering a small checked-in set
   of public-domain engraved band parts (score-plus-parts *and* single-instrument-only PDFs, to
   cover the "no bootstrap page" gap noted in the OMR persona's open questions) if detection
-  regressions become a recurring problem.
+  regressions become a recurring problem. The new `pdf-lib`-based in-memory fixture pattern above
+  narrows this gap for text-layer logic specifically, but the pixel/rendering-dependent half (staff/
+  barline detection) still has no committed real-PDF regression corpus, only literal-array unit
+  tests plus ad hoc Playwright/canvas verification during a session.
 
 ---
 

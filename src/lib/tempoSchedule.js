@@ -42,6 +42,22 @@ export function resolveBpmPerSystem(total, tempoByIndex, baseBpm) {
   return out;
 }
 
+// Collapses a per-system bpm array into the distinct tempos in document
+// order (e.g. [86, 128]) -- used for the "tempo changes detected" banner
+// (src/autoScrollUI.js). Deliberately takes whatever SLICE of bpmPerSystem
+// the caller passes in (a whole document's, or a single section's own --
+// see below) rather than assuming "the whole document" itself, so a
+// multi-part document doesn't look like it oscillates many times just
+// because each part reprints the same tempo structure (Finding 4, a real
+// multi-part "Score and Parts"-style file: the banner used to be computed
+// from the whole-document tempoSequence, so a normal "speeds up once, slows
+// down once" piece looked like it changed tempo 2x per part).
+export function tempoSequence(bpmPerSystem) {
+  const seq = [];
+  if (bpmPerSystem) for (const b of bpmPerSystem) if (b !== seq[seq.length - 1]) seq.push(b);
+  return seq;
+}
+
 // Which system is "current" at elapsed time t (clamped to the schedule's
 // range). Returns -1 for an empty schedule.
 export function systemIndexAtElapsed(schedule, t) {

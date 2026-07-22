@@ -1,7 +1,9 @@
 import { state } from './appState.js';
 import { $, toast, setStatus, syncAutoScrollButton } from './ui.js';
 import { analyzeScore } from './scoreAnalysis.js';
+import { renderAll } from './pdf.js';
 import { startAutoScroll, pauseAutoScroll, stopAutoScroll, currentTempoLabel, rebuildScheduleLive } from './autoScrollController.js';
+import { tempoSequence } from './lib/tempoSchedule.js';
 import { startLiveTempo, stopLiveTempo } from './liveTempo.js';
 import { resolveBand, scoreCanvases } from './systemGeometry.js';
 import { setFollowing } from './followController.js';
@@ -48,6 +50,13 @@ export function initAutoScrollUI() {
     } finally {
       $('analyzeScoreBtn').disabled = false;
     }
+    // Analyze may have found (and silently corrected) a page whose declared
+    // /Rotate flag was wrong (see scoreAnalysis.js's probePageRotation) — the
+    // visible canvases were rendered from the ORIGINAL declared rotation, so
+    // they need one more render pass to pick up the correction. Otherwise the
+    // displayed page stays sideways while system-band highlighting (computed
+    // against the corrected geometry) would be positioned as if it weren't.
+    if (result.rotationOverridesChanged) await renderAll();
     renderSummary(result);
     syncAutoScrollButton();
     toast(result.systemCount ? `Analyzed ${result.systemCount} systems` : 'No systems found');
@@ -118,18 +127,6 @@ function renderSummary(result) {
     ? `${base} No embedded text — measure numbers read from the page image; check the list if any look off.`
     : base;
 
-  // Printed tempo changes (♩=N marks) are applied automatically; show them so
-  // it's clear the piece won't run at one flat tempo, and that the manual
-  // Tempo slider now scales all of them together. A single tempo (or none
-  // detected) shows nothing — the slider behaves exactly as it always has.
-  const seq = result.tempoSequence || [];
-  const tempoInfo = $('autoScrollTempoInfo');
-  if (seq.length > 1) {
-    tempoInfo.textContent = `🎵 Tempo changes detected (${seq.map((b) => '♩=' + b).join(' → ')}) — applied automatically. Use Playback speed to practice slower.`;
-  } else {
-    tempoInfo.textContent = '';
-  }
-
   renderMeasureReadings();
 
   $('autoScrollWarnings').innerHTML = result.warnings.map((w) => '<li>' + w + '</li>').join('');
@@ -140,7 +137,7 @@ function renderSummary(result) {
   // parts), so the picker stays hidden and nothing about the UI changes.
   if (state.autoScroll.sections.length > 1) {
     $('sectionsBox').classList.remove('hidden');
-    selectSection(0); // also renders the sections list + measures list
+    selectSection(0); // also renders the sections list + measures list + tempo banner
   } else {
     $('sectionsBox').classList.add('hidden');
     // A single section doesn't go through selectSection(), so mirror its Tempo
@@ -149,8 +146,32 @@ function renderSummary(result) {
     $('bpmInput').value = state.autoScroll.bpm;
     $('bpmV').textContent = state.autoScroll.bpm + ' bpm';
     refreshTempoLabel();
+    refreshTempoInfo();
     renderMeasuresList();
   }
+}
+
+// Printed tempo changes (♩=N marks) are applied automatically; show them so
+// it's clear the piece won't run at one flat tempo, and that the manual
+// Tempo slider now scales all of them together. A single tempo (or none
+// detected) shows nothing — the slider behaves exactly as it always has.
+//
+// Computed from the ACTIVE SECTION's own bpmPerSystem slice, not a
+// whole-document sequence (Finding 4, a real multi-part "Score and Parts"-
+// style file): every part reprints the same tempo structure, so a
+// whole-document sequence made a normal "speeds up once, slows down once"
+// piece look like it changed tempo on every part boundary too. Re-run
+// whenever the active section changes (selectSection), not just once at
+// Analyze time.
+function refreshTempoInfo() {
+  const as = state.autoScroll;
+  const sec = as.sections[as.activeSectionIndex];
+  const bpmPerSystem = sec ? sec.bpmPerSystem : as.bpmPerSystem;
+  const seq = tempoSequence(bpmPerSystem);
+  const tempoInfo = $('autoScrollTempoInfo');
+  tempoInfo.textContent = seq.length > 1
+    ? `🎵 Tempo changes detected (${seq.map((b) => '♩=' + b).join(' → ')}) — applied automatically. Use Playback speed to practice slower.`
+    : '';
 }
 
 // Swaps a section's own remembered systemBands/measuresPerSystem/tempo/
@@ -176,6 +197,7 @@ function selectSection(idx) {
   $('bpmInput').value = sec.bpm;
   $('bpmV').textContent = sec.bpm + ' bpm';
   refreshTempoLabel();
+  refreshTempoInfo();
 
   // the active range just changed -- any in-progress schedule is stale.
   // stopAutoScroll() also re-syncs the Start/Pause button, using the
@@ -199,7 +221,17 @@ function renderSectionsList() {
   as.sections.forEach((sec, i) => {
     const opt = document.createElement('option');
     opt.value = String(i);
-    opt.textContent = `${sec.name} (${sec.systemBands.length} systems)`;
+    // A genericName section (see lib/scoreSections.js) was split purely from
+    // a printed measure-number reset, with no instrument name to back it up
+    // -- labeling it plainly as "Section 7" would read as an authoritative,
+    // deliberate name exactly like a real one, when it's really just an
+    // approximate auto-detected split point (worse still on noisy-OCR files
+    // that can over-split into many of these — Music Educator persona).
+    // Marking it makes that distinction visible without hiding the section
+    // (its own per-section measure counts are still real and useful).
+    opt.textContent = sec.genericName
+      ? `${sec.name} — auto-detected split (${sec.systemBands.length} systems)`
+      : `${sec.name} (${sec.systemBands.length} systems)`;
     select.appendChild(opt);
   });
   select.value = String(as.activeSectionIndex);

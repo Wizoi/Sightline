@@ -88,6 +88,39 @@ describe('buildSections', () => {
     expect(sections[0].name).toBe('Score');
   });
 
+  it('falls back to a generic name for a nameless boundary (a detected measure-number reset with no title match)', () => {
+    // See detectMeasureNumberResets (scoreText.js) -- a section boundary can
+    // be detected with no instrument name at all. The boundary OBJECT still
+    // exists (systemIndex, name: null), which must fall back the same way
+    // as no boundary object existing at that index at all.
+    const systemBands = [band(0), band(1), band(2)];
+    const measuresPerSystem = [4, 3, 5];
+    const boundaries = [{ systemIndex: 2, name: null, tempoMarking: null }];
+    const sections = buildSections({
+      boundaries, systemBands, measuresPerSystem, defaultBeatsPerMeasure: 4, defaultBpm: 100,
+    });
+    expect(sections).toHaveLength(2);
+    expect(sections[0].name).toBe('Score');
+    expect(sections[1].name).toBe('Section 2');
+  });
+
+  it('flags only the numbered Section-N fallback as genericName, not "Score" or a real matched name', () => {
+    const systemBands = [band(0), band(1), band(2)];
+    const measuresPerSystem = [4, 3, 5];
+    const boundaries = [{ systemIndex: 2, name: null, tempoMarking: null }];
+    const sections = buildSections({
+      boundaries, systemBands, measuresPerSystem, defaultBeatsPerMeasure: 4, defaultBpm: 100,
+    });
+    expect(sections[0].genericName).toBe(false); // "Score" -- a meaningful default, not noise
+    expect(sections[1].genericName).toBe(true);  // "Section 2" -- no real name behind it
+
+    const named = buildSections({
+      boundaries: [{ systemIndex: 2, name: 'Bass Clarinet', tempoMarking: null }],
+      systemBands, measuresPerSystem, defaultBeatsPerMeasure: 4, defaultBpm: 100,
+    });
+    expect(named[1].genericName).toBe(false); // a real matched instrument name
+  });
+
   it('returns an empty list for an empty score', () => {
     expect(buildSections({
       boundaries: [], systemBands: [], measuresPerSystem: [], defaultBeatsPerMeasure: 4, defaultBpm: 100,

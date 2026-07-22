@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSchedule, systemIndexAtElapsed, progressWithinSystem, nearestSystemIndex, beatTimestamps, nearestBeatTime, resolveBpmPerSystem } from './tempoSchedule.js';
+import { buildSchedule, systemIndexAtElapsed, progressWithinSystem, nearestSystemIndex, beatTimestamps, nearestBeatTime, resolveBpmPerSystem, tempoSequence } from './tempoSchedule.js';
 
 // measures [2,3,1], 4/4 @ 120bpm (0.5s/beat) -> durations 4s, 6s, 2s -> starts 0,4,10 -> total 12
 function sampleSchedule() {
@@ -140,5 +140,35 @@ describe('nearestBeatTime', () => {
   });
   it('returns null for an empty list', () => {
     expect(nearestBeatTime([], 1)).toBeNull();
+  });
+});
+
+describe('tempoSequence', () => {
+  it('collapses consecutive repeats into the distinct tempos in order', () => {
+    expect(tempoSequence([86, 86, 86, 128, 128])).toEqual([86, 128]);
+  });
+
+  it('returns a single-element sequence for a flat tempo (no banner shown by the caller)', () => {
+    expect(tempoSequence([120, 120, 120])).toEqual([120]);
+  });
+
+  it('returns an empty sequence for null/undefined (no printed marks detected)', () => {
+    expect(tempoSequence(null)).toEqual([]);
+    expect(tempoSequence(undefined)).toEqual([]);
+  });
+
+  it('returns an empty sequence for an empty array', () => {
+    expect(tempoSequence([])).toEqual([]);
+  });
+
+  it('is scoped to whatever slice is passed in -- the real Finding 4 fix', () => {
+    // Real bug: a multi-part document reprints the same tempo structure in
+    // each part, so a WHOLE-DOCUMENT sequence looks like it oscillates once
+    // per part (e.g. 4 parts x [86,128] each -> 8 "changes"). Computing it
+    // from just one section's own slice reports the real, single change.
+    const wholeDocument = [86, 128, 86, 128, 86, 128];
+    expect(tempoSequence(wholeDocument)).toEqual([86, 128, 86, 128, 86, 128]);
+    const oneSectionSlice = [86, 128]; // e.g. sections[i].bpmPerSystem
+    expect(tempoSequence(oneSectionSlice)).toEqual([86, 128]);
   });
 });

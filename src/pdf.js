@@ -46,9 +46,18 @@ export async function renderAll() {
   for (let i = 1; i <= state.pdfDoc.numPages; i++) {
     if (myGen !== renderGeneration) return;
     const page = await state.pdfDoc.getPage(i);
-    const base = page.getViewport({ scale: 1 });
+    // A resolved rotation OVERRIDE from analyzeScore()'s orientation probe
+    // (see lib/pageRotation.js) takes precedence over this page's own
+    // declared page.rotate — set only when Analyze found the declared
+    // rotation to be a real, convincing mistake (a scanning/assembly
+    // artifact seen on real PDFs). Absent any override (including on a
+    // freshly loaded document, before Analyze has run), this is undefined
+    // and getViewport() falls back to page.rotate exactly as before.
+    const rotation = state.autoScroll.pageRotationOverrides[i - 1];
+    const viewportOpts = rotation == null ? {} : { rotation };
+    const base = page.getViewport({ scale: 1, ...viewportOpts });
     const scale = targetWidth / base.width;
-    const vp = page.getViewport({ scale: scale * dpr });
+    const vp = page.getViewport({ scale: scale * dpr, ...viewportOpts });
     const canvas = document.createElement('canvas');
     canvas.width = vp.width; canvas.height = vp.height;
     canvas.style.width = targetWidth + 'px';
@@ -79,6 +88,7 @@ function resetAutoScrollAnalysis() {
   as.measureReadings = null;
   as.sections = [];
   as.activeSectionIndex = 0;
+  as.pageRotationOverrides = {};
   const hl = $('autoScrollHighlight');
   if (hl) hl.style.display = 'none';
   syncAutoScrollButton();

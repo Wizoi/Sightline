@@ -78,6 +78,19 @@ export const state = {
     analyzed: false,             // has "Analyze score" run for the current PDF?
     systemBands: [],             // [{ page, fracCenter, fracMin, fracMax }] per system — page-relative, from scoreAnalysis; resolved to doc px at use time via systemGeometry.js so they survive resize/zoom/rotation
     measuresPerSystem: [],       // editable estimate, one entry per system
+    // Per-page rotation OVERRIDE, keyed by 0-based page index, populated by
+    // analyzeScore()'s orientation probe (see lib/pageRotation.js) only for
+    // pages where the PDF's own declared page.rotate is convincingly wrong —
+    // a real scanning/assembly artifact seen on real combined-score PDFs, not
+    // a hypothetical. Value is an ABSOLUTE rotation (0/90/180/270) that
+    // REPLACES page.rotate for that page (pdfjs's getViewport({ rotation })
+    // overrides the declared rotation, it doesn't add to it). Empty = trust
+    // every page's own declared rotation, same as before this existed.
+    // Consulted by both scoreAnalysis.js (for the rest of that page's
+    // analysis passes) and pdf.js's renderAll() (so the visible canvases
+    // match what was analyzed). Reset on a new document load, same as
+    // systemBands/measuresPerSystem above.
+    pageRotationOverrides: {},
     // When an image-only PDF is read two ways (OCR per-number vs margin scan)
     // and they disagree, both whole-document count arrays are kept here so the
     // user can switch — { options: [{ label, measures }], active } | null. See

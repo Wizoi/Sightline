@@ -70,6 +70,53 @@ describe('pageSystems', () => {
     expect(systems.map((s) => Math.round(s.rowMax))).toEqual([327, 596, 860, 1124]);
   });
 
+  // A staff of 5 lines starting at row S (spacing 6, center S+12) -- matches
+  // this file's existing literal-row convention, just parameterized so a
+  // list of desired staff CENTERS can be turned into raw line rows.
+  function staffLines(startRow) {
+    return [startRow, startRow + 6, startRow + 12, startRow + 18, startRow + 24];
+  }
+  function staffRowsForCenters(centers) {
+    return centers.flatMap((c) => staffLines(c - 12));
+  }
+
+  it('does NOT group 2 unequal-size clusters just because a single gap looks bimodal (real corpus bug, Teutonia.pdf)', () => {
+    // Real bug found via a real scanned single-staff-part booklet ("Full band
+    // arrangements/Teutonia.pdf") with NO real bracing anywhere in the
+    // document: 7 solo staves, gaps mostly ~100-125 plus one much larger
+    // outlier gap (a scan/binding irregularity). kmeans2 saw that single
+    // outlier as "bimodal" and split the run into exactly 2 groups (sizes 4
+    // and 3) -- the old "tolerate at most one non-conforming group" check
+    // (best >= grp.length - 1) is VACUOUS for exactly 2 groups (best is
+    // always >= 1 out of 2), so it silently accepted this mismatched 4-vs-3
+    // split as "consistent" and merged unrelated solo staves into 2 fake
+    // multi-staff systems. Gaps here mirror that real shape: [100,100,100,
+    // 230,100,100] -- clearly bimodal by kmeans2 (ratio well over 0.3), but
+    // the two resulting group sizes (4 and 3) don't match, so this must fall
+    // back to 7 separate one-staff systems, not 2 grouped ones.
+    const centers = [12, 112, 212, 312, 542, 642, 742];
+    const rows = staffRowsForCenters(centers);
+    const systems = pageSystemsDetailed(rows);
+    expect(systems).toHaveLength(7);
+    expect(systems.map((s) => s.center)).toEqual(centers);
+  });
+
+  it('still groups 2 EQUAL-size clusters (real 2-system page, both systems share the same bracing)', () => {
+    // Contrast with the test above: when a real 2-group split has matching
+    // sizes (the normal case for a real score, which reuses the same
+    // instrumentation every system), it must still group -- the exact-match
+    // requirement for grp.length===2 must not reject genuinely consistent
+    // 2-system pages, only mismatched ones.
+    const rows = [
+      0, 6, 12, 18, 24,           // system A, staff 1
+      42, 48, 54, 60, 66,         // system A, staff 2
+      162, 168, 174, 180, 186,    // system B, staff 1
+      204, 210, 216, 222, 228,    // system B, staff 2
+    ];
+    const systems = pageSystemsDetailed(rows);
+    expect(systems).toHaveLength(2);
+  });
+
   it('collapses thick anti-aliased lines (multiple adjacent detected rows per physical line) before clustering into staves', () => {
     // Confirmed against a real rendered PDF: each physical staff line came
     // back as 2 adjacent "ink" rows (gap 1) rather than exactly 1, due to

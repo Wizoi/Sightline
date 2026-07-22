@@ -85,6 +85,49 @@ export function findTempoMarking(pageItems) {
   return null;
 }
 
+// A printed metronome mark's "= N" text, shared by extractTempoMarks (which
+// correlates it to a system by position) and hasTempoMarking below (which
+// just needs to know one exists somewhere on the page). The note-value glyph
+// itself (♩, ♩.) is a music-font character pdfjs usually drops or emits
+// separately -- see extractTempoMarks.
+const TEMPO_MARK_RE = /=\s*(\d{2,3})\b/;
+
+// Shared plausibility bounds for a metronome-mark BPM value — factored into
+// one place (previously duplicated as a literal `bpm >= 30 && bpm <= 400` in
+// both this file's isPlausibleBpm and extractTempoMarks below) so "enough to
+// recognize a section-title page" and "enough to actually set playback
+// tempo" can't silently diverge if one copy gets tuned later and the other
+// doesn't.
+const BPM_MIN = 30;
+const BPM_MAX = 400;
+function isPlausibleBpmValue(bpm) {
+  return bpm >= BPM_MIN && bpm <= BPM_MAX;
+}
+
+function isPlausibleBpm(str) {
+  const m = str.match(TEMPO_MARK_RE);
+  if (!m) return false;
+  return isPlausibleBpmValue(parseInt(m[1], 10));
+}
+
+// Whether this page carries ANY tempo signal at all, word-based ("Andante")
+// OR a bare printed metronome mark ("♩ = 127", read from the text layer as
+// just "= 127"). findSectionTitle only needs to know a tempo marking exists
+// somewhere on the page, not which system it belongs to, so this is a
+// lighter check than extractTempoMarks.
+//
+// Found on a real 8-file folder of trio scores (IMSLP-sourced): every one of
+// them prints ONLY a numeric mark, never an Italian word, so a word-only
+// gate silently failed to recognize any of their part-title pages as section
+// starts -- confirmed by dumping the real text layer (page 8 titled "B♭
+// Clarinet 1", left-margin, matching a known name from page 1 -- every
+// condition for findSectionTitle met except this one). Contrast: the one
+// real file that already worked (JugglingClowns) happens to print "Andante".
+export function hasTempoMarking(pageItems) {
+  if (findTempoMarking(pageItems)) return true;
+  return pageItems.some((it) => isPlausibleBpm(it.str));
+}
+
 // Candidate instrument/part names from a full-score's first page: rows near
 // the left margin that aren't a tempo word or a bare number.
 //
@@ -102,16 +145,60 @@ export function findTempoMarking(pageItems) {
 // edge (same y-space as pageRows) -- pad allows for a label sitting
 // slightly above the staff it names, which is normal, without reaching all
 // the way up to the title block's height above the first system.
-export function collectKnownNames(pageRows, topSystemY, { leftMarginX = 120, minLength = 2, pad = 30 } = {}) {
+//
+// Also requires a real run of letters (>= 2 consecutive) somewhere in the
+// text -- found necessary on a real dense 20+-instrument conductor's score
+// ("The Fantastic Parade"): its compact left-margin layout puts each
+// instrument's OWN time-signature digits at nearly the same y as that
+// instrument's name label, so groupIntoRows (correctly, by its own rules)
+// merges them into one row, producing garbage candidates like "6 J" or "b J"
+// (the "J" a stray music-font glyph that happens to decode to an ordinary
+// letter -- the same class of surprising glyph-decode noted on groupIntoRows
+// itself). A real instrument name or abbreviation always has a letter run
+// this long ("B Cl. 1", "A.Cl." from a real abbreviated label), so this
+// rejects the pure-noise fragments without rejecting any real one -- it
+// does NOT fully clean a compound row like "Oboes 8 J" (kept, since "Oboes"
+// still qualifies), but those are far less likely to spuriously re-match a
+// later page verbatim than a short, pure-noise fragment is.
+function hasRealNameShape(text) {
+  return /[A-Za-z]{2,}/.test(text);
+}
+
+// Returns [{ text, isFull }]. `firstSystem` (the bootstrap page's own first
+// system, { yTop, yBottom } in the same y-space as pageRows) distinguishes
+// which form each collected label is:
+//   - isFull: true  -- the row sits within (or up to `pad` above) system 0's
+//     OWN vertical band. A combined score's first system braces every
+//     instrument at once, each stacked at its own y but all within that one
+//     system's rowMin..rowMax -- this is where a FULL name is printed
+//     ("Clarinet in B 1"), exactly once, per the real engraving convention
+//     documented above.
+//   - isFull: false -- the row sits below system 0's own band, i.e. beside
+//     some LATER system on the bootstrap page. Every system after the first
+//     only ever reprints the ABBREVIATED form ("B Cl. 1"), every page,
+//     forever -- see findSectionTitle for why this distinction matters: an
+//     abbreviated label is real but re-matches on every continuation page of
+//     a combined score, which is NOT a section boundary.
+// firstSystem may be null (no systems detected on the bootstrap page at
+// all) -- in that case nothing above the page can be excluded and every
+// remaining candidate is treated as isFull (the old, pre-tagging behavior),
+// same as when topSystemY was null before this function distinguished forms.
+export function collectKnownNames(pageRows, firstSystem, { leftMarginX = 120, minLength = 2, pad = 30 } = {}) {
+  const topY = firstSystem ? firstSystem.yTop : null;
+  const bottomY = firstSystem ? firstSystem.yBottom : null;
   const seen = new Set();
   const names = [];
   for (const row of pageRows) {
     if (row.x >= leftMarginX) continue;
-    if (topSystemY != null && row.y > topSystemY + pad) continue;
+    if (topY != null && row.y > topY + pad) continue;
     const text = row.text;
     if (!text || text.length < minLength) continue;
     if (TEMPO_WORDS.includes(text) || /^\d+$/.test(text)) continue;
-    if (!seen.has(text)) { seen.add(text); names.push(text); }
+    if (!hasRealNameShape(text)) continue;
+    if (seen.has(text)) continue;
+    seen.add(text);
+    const isFull = bottomY == null || row.y >= bottomY;
+    names.push({ text, isFull });
   }
   return names;
 }
@@ -123,12 +210,24 @@ export function collectKnownNames(pageRows, topSystemY, { leftMarginX = 120, min
 // instrument name too (just centered, not at the left margin, and without
 // a restated tempo marking), which would otherwise look like a new section
 // start every single page.
+//
+// Only a knownNames entry with isFull:true is accepted as a match here — a
+// real bug found on a real multi-part "Score and Parts"-style file:
+// mid-Score CONTINUATION pages (every instrument still braced together, not
+// a new part at all) legitimately show an ABBREVIATED per-staff label at
+// the left margin on every page of the Score, plus the score's own numeric
+// tempo mark restated at the top of each page -- both real signals, but
+// present on every continuation page, not just a genuine new section start.
+// A genuine new part's own opening page always (re)prints that part's FULL
+// name (per the same "full once, abbreviated after" engraving convention
+// collectKnownNames relies on) -- so requiring isFull filters out the
+// false-positive continuation-page trigger without losing any real one.
 export function findSectionTitle(pageItems, pageRows, knownNames, { leftMarginX = 120 } = {}) {
-  if (!findTempoMarking(pageItems)) return null;
+  if (!hasTempoMarking(pageItems)) return null;
   for (const row of pageRows) {
     if (row.x >= leftMarginX) continue;
-    const match = knownNames.find((name) => row.text === name || row.text.startsWith(name));
-    if (match) return match;
+    const match = knownNames.find((n) => n.isFull && (row.text === n.text || row.text.startsWith(n.text)));
+    if (match) return match.text;
   }
   return null;
 }
@@ -175,10 +274,10 @@ export function extractMeasureNumbers(pageItems, systemsOnPage, { pad = 20 } = {
 export function extractTempoMarks(pageItems, systemsOnPage, { pad = 24 } = {}) {
   const markItems = [];
   for (const it of pageItems) {
-    const m = it.str.match(/=\s*(\d{2,3})\b/);
+    const m = it.str.match(TEMPO_MARK_RE);
     if (!m) continue;
     const bpm = parseInt(m[1], 10);
-    if (bpm >= 30 && bpm <= 400) markItems.push({ y: it.y, bpm });
+    if (isPlausibleBpmValue(bpm)) markItems.push({ y: it.y, bpm });
   }
   const results = [];
   for (const sys of systemsOnPage) {
@@ -254,10 +353,16 @@ export function refineMeasureCounts(measuresPerSystem, entries) {
 // off it is discarded, and those systems fall back to interpolation/barline
 // rather than being "refined" to a wrong exact count. Intended for OCR output
 // (image-only PDFs), where a stray digit can be misrecognized off the music —
-// and applied PER PAGE, never across pages, so a multi-part score whose numbers
-// legitimately reset per part isn't mistaken for a monotonicity break. The
-// clean PDF text layer needs no such filtering. Longest-increasing-subsequence
-// (O(n^2); n = systems-per-page, tiny). entries need not be pre-sorted.
+// and applied per PAGE (inside the per-page loop, before a page's entries are
+// added to the whole-document list) and again per SECTION once part
+// boundaries are known (`analyzeScore()`), never across a whole multi-part
+// document in one pass, so a score whose numbers legitimately reset per part
+// isn't mistaken for a monotonicity break (see detectMeasureNumberResets,
+// which finds exactly those legitimate resets and turns them into section
+// boundaries in the first place). The clean PDF text layer needs no per-page
+// filtering but still gets the per-section pass for the same reason.
+// Longest-increasing-subsequence (O(n^2); n = entries in the group being
+// checked, always small). entries need not be pre-sorted.
 export function filterMeasureNumberOutliers(entries) {
   if (entries.length <= 1) return entries.slice();
   const sorted = [...entries].sort((a, b) => a.systemIndex - b.systemIndex);
@@ -277,4 +382,58 @@ export function filterMeasureNumberOutliers(entries) {
   const keep = new Set();
   for (let k = bestEnd; k !== -1; k = prev[k]) keep.add(k);
   return sorted.filter((_, i) => keep.has(i));
+}
+
+// Detects a new part/section starting purely from its printed measure
+// numbers resetting -- e.g. a page that begins renumbering at 1 -- with NO
+// dependency on a matched instrument name. This is the one section-boundary
+// signal that still works on a PDF with no combined-score bootstrap page for
+// collectKnownNames to draw instrument names from at all (a booklet of
+// individual scanned parts, no "score" page ever printed) -- see
+// analyzeScore()'s known limitation on that bootstrap. Real measure numbers
+// only ever climb within a single part, so any DROP is either a genuine part
+// restart or a misread; `maxRestart` narrows it to the former by requiring
+// the post-drop number to be small (a real restart is always 1, occasionally
+// 2-3 for a pickup measure) -- an arbitrary same-page-adjacent drop to some
+// other, larger value is left alone (refineMeasureCounts' own `total <= 0`
+// guard already keeps a single stray misread from corrupting its system;
+// this function's job is specifically to recognize the confident case: a
+// real new part, worth a whole section boundary for).
+//
+// Also requires the very NEXT entry (if any) to genuinely be greater than
+// the drop -- i.e. numbering actually resumes climbing from there, not just
+// a one-off dip. Found necessary on a real trio score ("A Lazy Summer Day"):
+// a mis-extracted "2" (almost certainly some OTHER printed digit --
+// possibly a second-player suffix like "Flute 2" -- being picked up as if
+// it were a measure number, not a real restart) repeated identically across
+// SEVERAL consecutive systems. Without this check, every one of those
+// systems still only fires once (the first one triggers on the drop; the
+// following identical repeats aren't drops at all), but that single firing
+// was still a false section boundary, since nothing about a flatlined
+// repeat looks like real, climbing measure numbering. Requiring the next
+// reading to be strictly greater rejects exactly that flatline case (next
+// reading is the same repeated bad value, not greater) while still
+// accepting every real restart already covered by this function's tests
+// (which all climb normally afterward). Not airtight -- a truly isolated
+// one-off misread that happens to be followed by a real, further-climbing
+// number can still slip through -- but it removes the worst, most visible
+// failure mode (one bad reading fragmenting a document into several bogus
+// generic sections) found on a real, multi-file corpus sweep.
+//
+// entries need not be pre-sorted. Returns the systemIndex of each detected
+// reset (the system where the LOWER number was printed -- i.e. the new
+// part's own first system), each usable directly as a boundary systemIndex
+// for buildSections.
+export function detectMeasureNumberResets(entries, { maxRestart = 3 } = {}) {
+  if (entries.length < 2) return [];
+  const sorted = [...entries].sort((a, b) => a.systemIndex - b.systemIndex);
+  const resets = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const cur = sorted[i];
+    if (cur.measureNumber >= sorted[i - 1].measureNumber || cur.measureNumber > maxRestart) continue;
+    const next = sorted[i + 1];
+    if (next && next.measureNumber <= cur.measureNumber) continue; // doesn't resume climbing -- likely a misread, not a real restart
+    resets.push(cur.systemIndex);
+  }
+  return resets;
 }

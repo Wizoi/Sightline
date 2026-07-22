@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  TEMPO_WORDS, groupIntoRows, findTempoMarking, collectKnownNames, findSectionTitle, extractMeasureNumbers,
-  refineMeasureCounts, extractTempoMarks, filterMeasureNumberOutliers,
+  TEMPO_WORDS, groupIntoRows, findTempoMarking, hasTempoMarking, collectKnownNames, findSectionTitle,
+  extractMeasureNumbers, refineMeasureCounts, extractTempoMarks, filterMeasureNumberOutliers,
+  detectMeasureNumberResets,
 } from './scoreText.js';
 
 // item() mimics the simplified {str, x, y} shape scoreAnalysis.js extracts
@@ -102,18 +103,48 @@ describe('findTempoMarking', () => {
   });
 });
 
+describe('hasTempoMarking', () => {
+  it('is true for a tempo word', () => {
+    expect(hasTempoMarking([item('Andante', 82, 684)])).toBe(true);
+  });
+
+  it('is true for a bare numeric metronome mark, with no tempo word present', () => {
+    // Real case: an 8-file IMSLP trio-score folder prints ONLY "♩ = 127"
+    // (text layer carries just "= 127", the note glyph itself decoding to
+    // nothing), never an Italian tempo word.
+    expect(hasTempoMarking([item('= 127', 60, 735)])).toBe(true);
+  });
+
+  it('is true for a numeric mark with no space and a leading note glyph in the item', () => {
+    expect(hasTempoMarking([item('♩=100', 60, 505)])).toBe(true);
+  });
+
+  it('is false when neither a tempo word nor a plausible numeric mark is present', () => {
+    expect(hasTempoMarking([item('Juggling Clowns', 200, 750)])).toBe(false);
+  });
+
+  it('ignores an implausible numeric mark (a stray "= 5" or a huge value)', () => {
+    expect(hasTempoMarking([item('= 5', 60, 505), item('= 999', 60, 504)])).toBe(false);
+  });
+});
+
 describe('collectKnownNames', () => {
   // y values loosely mirror the real test file: a title block well above
   // the first system (y=739.7), the first system's own full-name labels
-  // roughly at its top edge (~691), and later systems' abbreviated labels
-  // further down the page (smaller y, PDF space is bottom-up).
-  const topSystemY = 691;
+  // roughly at its top edge (~691) down to its own bottom edge (~570,
+  // covering the whole braced system -- every instrument stacked at its own
+  // staff's y but all still within system 0's own band), and later systems'
+  // abbreviated labels further down the page (smaller y, PDF space is
+  // bottom-up) -- outside system 0's band entirely.
+  const firstSystem = { yTop: 691, yBottom: 570 };
 
-  it('collects both the full name (system 1) and abbreviated form (later systems)', () => {
+  it('collects both the full name (system 1, isFull) and abbreviated form (later systems, not isFull)', () => {
     // Mirrors the real finding: a score prints an instrument's full name
     // only once (beside its first system), then an abbreviated form beside
     // every system after -- neither "once" nor "repeats" alone tells real
-    // labels apart from one-off title text, so both forms must be kept.
+    // labels apart from one-off title text, so both forms must be kept, but
+    // tagged so callers (findSectionTitle) can tell them apart -- see the
+    // Finding 2 regression test below for why that tag matters.
     const rows = [
       { x: 39, y: 691, text: 'Clarinet in B 1' },
       { x: 120.7, y: 712, text: 'Andante' }, // right of the margin -- a real tempo-word row
@@ -123,44 +154,79 @@ describe('collectKnownNames', () => {
       { x: 39, y: 517, text: 'B Cl. 1' }, // system 2's abbreviated label
       { x: 46.5, y: 441, text: 'A.Cl.' },
     ];
-    expect(collectKnownNames(rows, topSystemY)).toEqual(['Clarinet in B 1', 'Alto Clarinet', 'Bass Clarinet', 'B Cl. 1', 'A.Cl.']);
+    expect(collectKnownNames(rows, firstSystem)).toEqual([
+      { text: 'Clarinet in B 1', isFull: true },
+      { text: 'Alto Clarinet', isFull: true },
+      { text: 'Bass Clarinet', isFull: true },
+      { text: 'B Cl. 1', isFull: false },
+      { text: 'A.Cl.', isFull: false },
+    ]);
   });
 
   it('excludes title-block text sitting above the first system, even at the left margin', () => {
     // The real gotcha this was built to fix: "Score" sits at the left
     // margin just like a real instrument label, but well above where the
-    // first system begins (y=739.7 vs. topSystemY=691) -- unlike either
-    // form of a genuine label.
+    // first system begins (y=739.7 vs. firstSystem.yTop=691) -- unlike
+    // either form of a genuine label.
     const rows = [
       { x: 73.9, y: 739.7, text: 'Score' },
       { x: 39, y: 691, text: 'Clarinet in B 1' },
     ];
-    expect(collectKnownNames(rows, topSystemY)).toEqual(['Clarinet in B 1']);
+    expect(collectKnownNames(rows, firstSystem)).toEqual([{ text: 'Clarinet in B 1', isFull: true }]);
   });
 
   it('allows a label sitting a little above the system it names, within pad', () => {
-    const rows = [{ x: 39, y: topSystemY + 10, text: 'Clarinet in B 1' }];
-    expect(collectKnownNames(rows, topSystemY, { pad: 30 })).toEqual(['Clarinet in B 1']);
+    const rows = [{ x: 39, y: firstSystem.yTop + 10, text: 'Clarinet in B 1' }];
+    expect(collectKnownNames(rows, firstSystem, { pad: 30 })).toEqual([{ text: 'Clarinet in B 1', isFull: true }]);
   });
 
-  it('does not apply the position filter when topSystemY is unknown (null)', () => {
+  it('does not apply the position filter when firstSystem is unknown (null), and treats everything as isFull', () => {
     const rows = [{ x: 39, y: 9999, text: 'Clarinet in B 1' }];
-    expect(collectKnownNames(rows, null)).toEqual(['Clarinet in B 1']);
+    expect(collectKnownNames(rows, null)).toEqual([{ text: 'Clarinet in B 1', isFull: true }]);
   });
 
   it('ignores rows at or past the left-margin threshold', () => {
     const rows = [{ x: 120, y: 691, text: 'Some Title' }];
-    expect(collectKnownNames(rows, topSystemY, { leftMarginX: 120 })).toEqual([]);
+    expect(collectKnownNames(rows, firstSystem, { leftMarginX: 120 })).toEqual([]);
   });
 
   it('ignores very short strings', () => {
     const rows = [{ x: 10, y: 691, text: 'B' }];
-    expect(collectKnownNames(rows, topSystemY, { minLength: 2 })).toEqual([]);
+    expect(collectKnownNames(rows, firstSystem, { minLength: 2 })).toEqual([]);
+  });
+
+  it('rejects pure-noise fragments with no real run of letters (a real dense-score bug)', () => {
+    // Real finding on "The Fantastic Parade" (a 20+-instrument conductor's
+    // score): its compact left margin puts each instrument's own time
+    // signature at nearly the same y as that instrument's name, so
+    // groupIntoRows correctly-by-its-own-rules merges them into one row --
+    // producing garbage like "6 J" or "b J" ("J" a stray music-font glyph
+    // decoding to an ordinary letter). These have no real word in them and
+    // must not become "known names" -- they trivially self-match on every
+    // later page where the same time-signature noise repeats alone,
+    // spawning a garbage section boundary per page.
+    const rows = [
+      { x: 39, y: 691, text: '6 J' },
+      { x: 39, y: 660, text: 'b J J' },
+      { x: 39, y: 630, text: '8 J' },
+    ];
+    expect(collectKnownNames(rows, firstSystem)).toEqual([]);
+  });
+
+  it('keeps a compound row that still has a real name prefix, even with trailing noise', () => {
+    // Less clean than fully-rejecting, but a real prefix ("Oboes") is far
+    // less likely to spuriously re-match a later page verbatim than a
+    // pure-noise fragment is -- see collectKnownNames' own comment.
+    const rows = [{ x: 39, y: 691, text: 'Oboes 8 J' }];
+    expect(collectKnownNames(rows, firstSystem)).toEqual([{ text: 'Oboes 8 J', isFull: true }]);
   });
 });
 
 describe('findSectionTitle', () => {
-  const knownNames = ['Clarinet in B 1', 'Bass Clarinet'];
+  const knownNames = [
+    { text: 'Clarinet in B 1', isFull: true },
+    { text: 'Bass Clarinet', isFull: true },
+  ];
 
   it('detects a real title page: left-margin name + a tempo marking present', () => {
     const items = [item('Andante', 82, 684), item('Bass Clarinet', 39, 728)];
@@ -180,6 +246,43 @@ describe('findSectionTitle', () => {
     const items = [item('Andante', 82, 684)];
     const rows = [{ x: 39, y: 728, text: 'Some Other Part' }];
     expect(findSectionTitle(items, rows, knownNames)).toBeNull();
+  });
+
+  it('detects a real title page whose only tempo signal is a bare numeric metronome mark', () => {
+    // The real bug this fixes: an 8-file IMSLP trio-score folder prints
+    // "B Clarinet 1" (matches knownNames via startsWith) at the left margin
+    // plus "= 127" -- never an Italian tempo word -- so the old word-only
+    // gate rejected every one of these real title pages.
+    const items = [item('= 127', 60, 735), item('Bass Clarinet', 39, 728)];
+    const rows = [{ x: 39, y: 728, text: 'Bass Clarinet' }, { x: 216, y: 739, text: 'The Spanish Winds' }];
+    expect(findSectionTitle(items, rows, knownNames)).toBe('Bass Clarinet');
+  });
+
+  it('still rejects a continuation page with a numeric mark but no left-margin name match', () => {
+    const items = [item('= 127', 60, 735)];
+    const rows = [{ x: 275, y: 738, text: 'Some Other Part' }];
+    expect(findSectionTitle(items, rows, knownNames)).toBeNull();
+  });
+
+  it('rejects a match against an ABBREVIATED (non-full) known name (real "Score and Parts" bug, Finding 2)', () => {
+    // Real bug: a mid-Score CONTINUATION page (every instrument still
+    // braced together, not a new part) legitimately shows an abbreviated
+    // per-staff label at the left margin (as it does on every page of the
+    // Score) plus the Score's own numeric tempo mark restated at the top --
+    // both real signals, wrongly treated as "a new part's title page"
+    // before this fix. A genuine new part's own opening page always prints
+    // its FULL name, so only an isFull match should ever trigger a boundary.
+    const abbrevOnly = [{ text: 'B Cl. 1', isFull: false }];
+    const items = [item('= 127', 60, 735), item('B Cl. 1', 39, 728)];
+    const rows = [{ x: 39, y: 728, text: 'B Cl. 1' }, { x: 216, y: 739, text: 'Juggling Clowns' }];
+    expect(findSectionTitle(items, rows, abbrevOnly)).toBeNull();
+  });
+
+  it('still accepts a full-name match even when an abbreviated entry for the same instrument also exists', () => {
+    const mixed = [{ text: 'Bass Clarinet', isFull: true }, { text: 'B Cl. 1', isFull: false }];
+    const items = [item('Andante', 82, 684), item('Bass Clarinet', 39, 728)];
+    const rows = [{ x: 39, y: 728, text: 'Bass Clarinet' }, { x: 216, y: 739, text: 'Juggling Clowns' }];
+    expect(findSectionTitle(items, rows, mixed)).toBe('Bass Clarinet');
   });
 });
 
@@ -418,5 +521,107 @@ describe('filterMeasureNumberOutliers', () => {
   it('returns a 0/1-entry list unchanged', () => {
     expect(filterMeasureNumberOutliers([])).toEqual([]);
     expect(filterMeasureNumberOutliers([{ systemIndex: 0, measureNumber: 5 }])).toEqual([{ systemIndex: 0, measureNumber: 5 }]);
+  });
+});
+
+describe('detectMeasureNumberResets', () => {
+  it('detects a part restarting at measure 1', () => {
+    const entries = [
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 1, measureNumber: 14 },
+      { systemIndex: 2, measureNumber: 1 }, // a new part begins here
+      { systemIndex: 3, measureNumber: 5 },
+    ];
+    expect(detectMeasureNumberResets(entries)).toEqual([2]);
+  });
+
+  it('detects multiple resets across a multi-part booklet', () => {
+    const entries = [
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 5, measureNumber: 30 },
+      { systemIndex: 6, measureNumber: 1 }, // part 2 starts
+      { systemIndex: 10, measureNumber: 22 },
+      { systemIndex: 11, measureNumber: 2 }, // part 3 starts (pickup measure "2")
+      { systemIndex: 15, measureNumber: 18 },
+    ];
+    expect(detectMeasureNumberResets(entries)).toEqual([6, 11]);
+  });
+
+  it('does not flag a plain increasing sequence', () => {
+    const entries = [
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 1, measureNumber: 14 },
+      { systemIndex: 2, measureNumber: 18 },
+    ];
+    expect(detectMeasureNumberResets(entries)).toEqual([]);
+  });
+
+  it('does not flag a drop to a value above maxRestart (likely a misread, not a real restart)', () => {
+    // A genuine restart is always small (1, or a small pickup number); a
+    // drop to something bigger (e.g. 38 misread as 25) is left for
+    // refineMeasureCounts' own defensive total<=0 guard to no-op on,
+    // rather than spawning a bogus section boundary.
+    const entries = [
+      { systemIndex: 0, measureNumber: 30 },
+      { systemIndex: 1, measureNumber: 25 },
+      { systemIndex: 2, measureNumber: 29 },
+    ];
+    expect(detectMeasureNumberResets(entries)).toEqual([]);
+  });
+
+  it('respects a custom maxRestart', () => {
+    const entries = [{ systemIndex: 0, measureNumber: 30 }, { systemIndex: 1, measureNumber: 5 }];
+    expect(detectMeasureNumberResets(entries)).toEqual([]); // 5 > default maxRestart of 3
+    expect(detectMeasureNumberResets(entries, { maxRestart: 5 })).toEqual([1]);
+  });
+
+  it('sorts by systemIndex before evaluating (order-independent)', () => {
+    const entries = [
+      { systemIndex: 2, measureNumber: 1 },
+      { systemIndex: 0, measureNumber: 9 },
+      { systemIndex: 1, measureNumber: 14 },
+    ];
+    expect(detectMeasureNumberResets(entries)).toEqual([2]);
+  });
+
+  it('rejects a flatlined repeated misread instead of a real restart (real corpus bug)', () => {
+    // Real finding on "A Lazy Summer Day": some OTHER printed digit (almost
+    // certainly not a measure number at all -- possibly a second-player
+    // suffix like "Flute 2") gets picked up as measureNumber 2 on several
+    // consecutive systems in a row. A genuine restart always resumes
+    // climbing on the very next reading; a flatlined repeat never does, so
+    // this must be rejected even though the very first "2" alone looks
+    // exactly like a valid small-restart drop.
+    const entries = [
+      { systemIndex: 0, measureNumber: 15 },
+      { systemIndex: 1, measureNumber: 19 },
+      { systemIndex: 2, measureNumber: 2 }, // misread, not a real restart
+      { systemIndex: 3, measureNumber: 2 }, // same misread again
+      { systemIndex: 4, measureNumber: 2 },
+      { systemIndex: 5, measureNumber: 36 }, // real numbering resumes
+    ];
+    expect(detectMeasureNumberResets(entries)).toEqual([]);
+  });
+
+  it('still accepts a real restart whose very next reading confirms it climbs', () => {
+    const entries = [
+      { systemIndex: 0, measureNumber: 24 },
+      { systemIndex: 1, measureNumber: 2 }, // a genuine restart this time
+      { systemIndex: 2, measureNumber: 6 }, // confirms it: climbing again
+    ];
+    expect(detectMeasureNumberResets(entries)).toEqual([1]);
+  });
+
+  it('accepts a restart with no following entry to confirm or contradict it', () => {
+    const entries = [
+      { systemIndex: 0, measureNumber: 24 },
+      { systemIndex: 1, measureNumber: 2 }, // last entry -- nothing to contradict it
+    ];
+    expect(detectMeasureNumberResets(entries)).toEqual([1]);
+  });
+
+  it('returns nothing for a 0/1-entry list', () => {
+    expect(detectMeasureNumberResets([])).toEqual([]);
+    expect(detectMeasureNumberResets([{ systemIndex: 0, measureNumber: 5 }])).toEqual([]);
   });
 });

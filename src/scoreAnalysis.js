@@ -4,13 +4,87 @@ import { pageSystemsDetailed } from './lib/systemDetection.js';
 import { estimateMeasureCount } from './lib/barlineDetection.js';
 import {
   groupIntoRows, collectKnownNames, findSectionTitle, findTempoMarking,
-  extractMeasureNumbers, refineMeasureCounts, extractTempoMarks, filterMeasureNumberOutliers,
+  extractMeasureNumbers, extractTempoMarks, filterMeasureNumberOutliers,
 } from './lib/scoreText.js';
 import { buildSections } from './lib/scoreSections.js';
-import { resolveBpmPerSystem } from './lib/tempoSchedule.js';
+import {
+  pickPrimaryEntries, addMeasureNumberResetBoundaries, resolveTempoSchedule,
+  chooseMeasureReadings, computeWarnings,
+} from './lib/scoreAssembly.js';
 import { detectTimeSignature } from './timeSigDetection.js';
 import { locateMeasureNumber } from './lib/measureNumberLocate.js';
 import { ocrNumbersByBox, ocrNumbersByStrip, terminateOcr } from './ocr.js';
+import { scoreOrientation, chooseRotation } from './lib/pageRotation.js';
+
+// Some source PDFs carry a wrong /Rotate flag on individual pages — a real
+// scanning/assembly artifact (confirmed on two real combined-score PDFs: a
+// portrait page declares /Rotate 270 when 0 is actually correct, feeding
+// vertical-staff pixels into the horizontal staff-line scanner below and
+// producing nonsense measure counts on just that page). probePageRotation()
+// renders each page at all 4 absolute rotations at this small fixed
+// resolution — cheap (this budget keeps the longer rendered edge to ~220px,
+// vs. the detailed pass's ah=1200 below — on the order of 30x fewer pixels),
+// so every page gets probed unconditionally rather than only ones whose
+// declared rotation "looks suspicious": the failure mode doesn't fail
+// cleanly (a page like this still detects a FEW garbage systems, not zero),
+// so there's no reliable trigger to gate a conditional retry on.
+const ROTATION_PROBE_LONG_EDGE = 220;
+
+// Calibrated against real scores dumped from 3 real files (see docs/
+// PERSONAS.md section 3 for the full writeup) at this exact probe
+// resolution, not guessed:
+//   - MUST override: Teutonia.pdf p.3/22 (declares /Rotate 270, scores 89 at
+//     rotation 0 vs 0 at 270) and MonogramMarch.pdf p.4/28 (score 57 at 0)
+//     and p.5/28 (score 29 at 0 -- the tightest real margin found, since
+//     it's a sparser continuation page with fewer systems than p.4).
+//   - MUST NOT override (floor guard): blank/cover/text-only pages score at
+//     most 6 (Teutonia p.1, a text-only cover with no music in any
+//     rotation) across every candidate rotation.
+//   - MUST NOT override (regression guard): every one of "Fat Burger parts
+//     with drums (1).pdf"'s 41 pages declares /Rotate 270 and IS genuinely
+//     correct there, but scores surprisingly low even in its own correct
+//     orientation (at most 8) -- this file's individual-part pages are
+//     sparser than the two combined scores above, and 90 vs 270 (both
+//     valid "portrait" candidates for a landscape-stored page) often score
+//     within 1-2 of each other, a real instance of the same 0-vs-180
+//     ambiguity noted on chooseRotation() -- but never enough to threaten
+//     the floor.
+// floor=15 sits with real margin above the highest observed noise (8) and
+// real margin below the tightest genuine signal (29). ratio=3 is a general
+// safety net for a future file where a wrong declared rotation's own score
+// isn't 0 (every real override case found had a 0 declared-rotation score,
+// so ratio wasn't actually exercised by this calibration -- floor did all
+// the real work here).
+const ROTATION_DECISION = { floor: 15, ratio: 3 };
+
+async function probePageRotation(page) {
+  const scores = {};
+  for (const rotation of [0, 90, 180, 270]) {
+    const rotVp1 = page.getViewport({ scale: 1, rotation });
+    const longEdge = Math.max(rotVp1.width, rotVp1.height);
+    const scale = ROTATION_PROBE_LONG_EDGE / longEdge;
+    const vp = page.getViewport({ scale, rotation });
+    const w = Math.max(20, Math.round(vp.width));
+    const h = Math.max(20, Math.round(vp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h); // ink test assumes a white ground; PDF pages may render transparent
+    try {
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const data = ctx.getImageData(0, 0, w, h).data;
+      const isInk = (r, c) => {
+        const i = (r * w + c) * 4;
+        return data[i] + data[i + 1] + data[i + 2] < 570;
+      };
+      scores[rotation] = scoreOrientation(isInk, w, h);
+    } catch (e) {
+      scores[rotation] = 0; // failed render for this candidate -- treat as no signal, never as a reason to override
+    }
+  }
+  return chooseRotation(scores, page.rotate, ROTATION_DECISION);
+}
 
 // Time-signature glyphs are small — at the shared analysis canvas's
 // resolution (tuned for staff-line/barline detection, not fine shape
@@ -23,7 +97,7 @@ import { ocrNumbersByBox, ocrNumbersByStrip, terminateOcr } from './ocr.js';
 // is tiny and this only runs once per detected section, not per page.
 const TIMESIG_RENDER_SCALE = 10;
 
-async function renderHighResRegion(page, pageWidthPts, pageHeightPts, ah, aw, rowMin, rowMax, colEnd) {
+async function renderHighResRegion(page, pageWidthPts, pageHeightPts, ah, aw, rowMin, rowMax, colEnd, rotation) {
   const pointsPerRow = pageHeightPts / ah, pointsPerCol = pageWidthPts / aw;
   const topPt = rowMin * pointsPerRow, bottomPt = rowMax * pointsPerRow;
   const rightPt = colEnd * pointsPerCol;
@@ -34,7 +108,12 @@ async function renderHighResRegion(page, pageWidthPts, pageHeightPts, ah, aw, ro
   canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-  const viewport = page.getViewport({ scale: TIMESIG_RENDER_SCALE });
+  // Must match the rotation used everywhere else for this page (see
+  // probePageRotation) -- pageWidthPts/pageHeightPts and the row/col math
+  // above are already expressed in that resolved rotation's space, so the
+  // render itself needs the same rotation or the region would be cropped
+  // from the wrong part of a differently-oriented page.
+  const viewport = page.getViewport({ scale: TIMESIG_RENDER_SCALE, rotation });
   await page.render({
     canvasContext: ctx,
     viewport,
@@ -61,11 +140,16 @@ async function renderHighResRegion(page, pageWidthPts, pageHeightPts, ah, aw, ro
 // systemsOnPage rows are in the ah-tall analysis space, so they're scaled to
 // this render's height. Returns { boxEntries, stripEntries }, each
 // [{ systemIndex, measureNumber }].
-const arraysEqual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+// Shallow key/value equality for the {pageIndex: rotation} override map.
+const overridesEqual = (a, b) => {
+  const ak = Object.keys(a), bk = Object.keys(b);
+  return ak.length === bk.length && ak.every((k) => a[k] === b[k]);
+};
 
 // Render a page to an offscreen white-backed canvas ~targetW px wide.
-async function renderPageCanvas(page, viewport1x, targetW) {
-  const vp = page.getViewport({ scale: targetW / viewport1x.width });
+async function renderPageCanvas(page, viewport1x, targetW, rotation) {
+  const vp = page.getViewport({ scale: targetW / viewport1x.width, rotation });
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(vp.width);
   canvas.height = Math.round(vp.height);
@@ -83,9 +167,9 @@ async function renderPageCanvas(page, viewport1x, targetW) {
 // gets its own render.
 const OCR_BOX_WIDTH = 2600;
 const OCR_STRIP_WIDTH = 1500;
-async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, ah) {
+async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, ah, rotation) {
   // BOX method: locate a tight box per system on the high-res render, OCR each.
-  const boxCanvas = await renderPageCanvas(page, viewport1x, OCR_BOX_WIDTH);
+  const boxCanvas = await renderPageCanvas(page, viewport1x, OCR_BOX_WIDTH, rotation);
   const data = boxCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, boxCanvas.width, boxCanvas.height).data;
   const isInk = (r, c) => {
     if (r < 0 || r >= boxCanvas.height || c < 0 || c >= boxCanvas.width) return false;
@@ -105,7 +189,7 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
   const boxEntries = await ocrNumbersByBox(boxCanvas, boxes);
 
   // STRIP method: OCR the whole left margin on the lower-res render, correlate.
-  const stripCanvas = await renderPageCanvas(page, viewport1x, OCR_STRIP_WIDTH);
+  const stripCanvas = await renderPageCanvas(page, viewport1x, OCR_STRIP_WIDTH, rotation);
   const stripItems = await ocrNumbersByStrip(stripCanvas, viewport1x.width, viewport1x.height);
   const stripEntries = extractMeasureNumbers(stripItems, systemsForText);
 
@@ -127,13 +211,21 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
 // numbers — see lib/scoreText.js for why this is possible without OCR for
 // PDFs exported from notation software. Known instrument/part names are
 // bootstrapped from page 1 alone (a combined score's opening page lists
-// every instrument once per system); a PDF that's just individual parts
-// with no combined score first won't have that bootstrap signal, so its
-// parts won't be auto-split — a real, accepted limitation, not a bug.
+// every instrument once per system); a PDF that's just individual scanned
+// parts with no combined score first won't have that bootstrap signal, so
+// title-matching alone can't split it into named sections. It still gets
+// split into GENERICALLY-named sections, though, via the other, title-
+// independent boundary signal: a printed measure number resetting (see
+// detectMeasureNumberResets in lib/scoreText.js) — this was found to matter
+// for more than naming: without it, a later part's own correctly-read
+// measure numbers looked like "outliers" relative to an earlier part's
+// bigger numbers in one whole-document refinement pass, corrupting that
+// part's measure counts back to the raw (often wildly wrong) barline
+// estimate. See lib/scoreAssembly.js's refineMeasuresPerSection.
 export async function analyzeScore() {
   const systemBands = [];
   const measuresPerSystem = [];
-  const boundaries = [];
+  let boundaries = [];
   const measureNumberEntries = [];       // from the PDF text layer
   const ocrEntriesBox = [];              // OCR method BOX (per-number), image-only PDFs
   const ocrEntriesStrip = [];            // OCR method STRIP (left-margin scan), image-only PDFs
@@ -141,6 +233,7 @@ export async function analyzeScore() {
   const timeSigByIndex = {}; // global system index -> best-effort {beatsPerMeasure, noteValue, confidence}
   let knownNames = [];
   let usedOcrAnywhere = false; // any page fell back to OCR -> terminate the worker + note it in the summary
+  const rotationOverrides = {}; // rebuilt fresh each run, same as systemBands/measuresPerSystem below
 
   const tmp = document.createElement('canvas');
   const tctx = tmp.getContext('2d', { willReadFrequently: true });
@@ -148,6 +241,16 @@ export async function analyzeScore() {
   const numPages = state.pdfDoc.numPages;
   for (let pageIdx = 0; pageIdx < numPages; pageIdx++) {
     const page = await state.pdfDoc.getPage(pageIdx + 1);
+
+    // Resolve this page's ACTUAL orientation before anything else touches it
+    // -- every subsequent render/measurement for this page (the detailed
+    // pass just below, the text-layer viewport, the OCR renders, the
+    // time-sig high-res re-render) uses this resolved rotation instead of
+    // implicitly trusting page.rotate. See probePageRotation() above for why
+    // this runs unconditionally rather than only on pages that "look wrong".
+    const rotation = await probePageRotation(page);
+    const declaredRotation = ((page.rotate % 360) + 360) % 360;
+    if (rotation !== declaredRotation) rotationOverrides[pageIdx] = rotation;
 
     // Render this page to a FIXED-resolution offscreen canvas for detection,
     // rather than reusing the on-screen display canvas. The display canvas's
@@ -163,8 +266,8 @@ export async function analyzeScore() {
     // and counts everywhere. systemBands are stored page-relative (fractions of
     // ah), so on-screen scroll/highlight still map correctly at any resolution.
     const ah = 1200;
-    const base = page.getViewport({ scale: 1 });
-    const vp = page.getViewport({ scale: ah / base.height });
+    const base = page.getViewport({ scale: 1, rotation });
+    const vp = page.getViewport({ scale: ah / base.height, rotation });
     const aw = Math.max(60, Math.round(vp.width));
     tmp.width = aw; tmp.height = ah;
     tctx.fillStyle = '#fff';
@@ -239,7 +342,7 @@ export async function analyzeScore() {
     // score, say) just skips this part rather than failing anything.
     try {
       const content = await page.getTextContent();
-      const pageViewport1x = page.getViewport({ scale: 1 });
+      const pageViewport1x = page.getViewport({ scale: 1, rotation });
       const pdfHeight = pageViewport1x.height;
       const pageItems = content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
 
@@ -269,7 +372,7 @@ export async function analyzeScore() {
         // title-match target -- checking it too would match its own
         // just-collected names and wrongly rename the opening "Score"
         // section after whichever instrument happens to be listed first.
-        knownNames = collectKnownNames(pageRows, systemsForText[0] ? systemsForText[0].yTop : null);
+        knownNames = collectKnownNames(pageRows, systemsForText[0] || null);
         isSectionStart = true; // page 1 is always the first section's start
       } else {
         const title = findSectionTitle(pageItems, pageRows, knownNames);
@@ -291,7 +394,7 @@ export async function analyzeScore() {
       if (isSectionStart && firstSystemPixelInfo) {
         const { globalIndex, rowMin, rowMax, firstBarlineCol } = firstSystemPixelInfo;
         const { isInk: hiResIsInk, width, height } = await renderHighResRegion(
-          page, pageViewport1x.width, pdfHeight, ah, aw, rowMin, rowMax, firstBarlineCol,
+          page, pageViewport1x.width, pdfHeight, ah, aw, rowMin, rowMax, firstBarlineCol, rotation,
         );
         const detected = detectTimeSignature(hiResIsInk, 0, height - 1, 0, width);
         if (detected) timeSigByIndex[globalIndex] = detected;
@@ -307,7 +410,7 @@ export async function analyzeScore() {
         // tempo words / time-sig digits aren't text here, so nothing else to read.
         usedOcrAnywhere = true;
         setStatus('', `Reading printed measure numbers (page ${pageIdx + 1}/${numPages})…`);
-        const { boxEntries, stripEntries } = await ocrPageNumbers(page, pageViewport1x, systemsOnThisPage, systemsForText, ah);
+        const { boxEntries, stripEntries } = await ocrPageNumbers(page, pageViewport1x, systemsOnThisPage, systemsForText, ah, rotation);
         ocrEntriesBox.push(...filterMeasureNumberOutliers(boxEntries));
         ocrEntriesStrip.push(...filterMeasureNumberOutliers(stripEntries));
       } else {
@@ -320,55 +423,78 @@ export async function analyzeScore() {
 
   if (usedOcrAnywhere) await terminateOcr(); // free the OCR worker thread + model
 
-  // Measure counts. For text-layer PDFs there's one reading. For image PDFs the
-  // two OCR methods each yield one; default to whichever read more systems, and
-  // when they disagree keep the other as a switchable alternative (some
-  // engravings suit one method, some the other — the user decides).
-  let refinedMeasures;
-  let readings = null;
-  if (usedOcrAnywhere) {
-    const box = { label: 'Per-number', measures: refineMeasureCounts(measuresPerSystem, ocrEntriesBox), coverage: ocrEntriesBox.length };
-    const strip = { label: 'Margin scan', measures: refineMeasureCounts(measuresPerSystem, ocrEntriesStrip), coverage: ocrEntriesStrip.length };
-    const ordered = strip.coverage > box.coverage ? [strip, box] : [box, strip];
-    refinedMeasures = ordered[0].measures;
-    if (!arraysEqual(ordered[0].measures, ordered[1].measures)) {
-      readings = { options: ordered.map((o) => ({ label: o.label, measures: o.measures })), active: 0 };
-    }
-  } else {
-    refinedMeasures = refineMeasureCounts(measuresPerSystem, measureNumberEntries);
-  }
-  state.autoScroll.measureReadings = readings;
+  // Whether any page's resolved rotation differs from its declared one --
+  // the caller (autoScrollUI.js) uses this to trigger one renderAll() pass
+  // so the visible canvases match what was just analyzed (system-band
+  // highlighting is computed against the RESOLVED geometry, so a still-
+  // sideways displayed page would otherwise disagree with it).
+  const rotationOverridesChanged = !overridesEqual(state.autoScroll.pageRotationOverrides, rotationOverrides);
+  state.autoScroll.pageRotationOverrides = rotationOverrides;
 
-  // Collapse the printed ♩=N marks into one tempo per system (first mark on a
-  // system wins; carried forward from there). Only build a bpmPerSystem when
-  // marks were actually found — otherwise leave it null so playback stays flat
-  // on the manual Tempo slider exactly as before.
-  const tempoByIndex = {};
-  for (const e of tempoMarkEntries) if (tempoByIndex[e.systemIndex] == null) tempoByIndex[e.systemIndex] = e.bpm;
-  const hasTempoMarks = Object.keys(tempoByIndex).length > 0;
-  const bpmPerSystem = hasTempoMarks
-    ? resolveBpmPerSystem(systemBands.length, tempoByIndex, state.autoScroll.bpm)
-    : null;
+  // Section boundaries: a matched instrument-name title page (above) PLUS a
+  // printed measure number resetting (e.g. back to 1) -- the latter needs no
+  // instrument-name bootstrap at all, so it's what still splits a booklet of
+  // individual scanned parts with no combined-score first page for
+  // collectKnownNames to draw names from (a real, previously-undetectable
+  // case -- see detectMeasureNumberResets in lib/scoreText.js). See
+  // lib/scoreAssembly.js's own doc comments for why the primary-entries pick
+  // is independent of the measure-COUNT refinement's own source choice below.
+  const primaryEntries = pickPrimaryEntries([measureNumberEntries, ocrEntriesBox, ocrEntriesStrip]);
+  boundaries = addMeasureNumberResetBoundaries(boundaries, primaryEntries, systemBands.length);
+
+  // Collapse the printed ♩=N marks into one tempo per system, carried
+  // forward from each mark until the next one overrides it -- null when no
+  // marks were found at all, so playback stays flat on the manual Tempo
+  // slider exactly as before (lib/scoreAssembly.js's resolveTempoSchedule).
+  const { bpmPerSystem, opening: openingBpm } = resolveTempoSchedule(tempoMarkEntries, systemBands.length, state.autoScroll.bpm);
 
   // When the score prints its own tempo, adopt the opening tempo as the base
   // the manual slider starts from (so the slider reads the real tempo and
   // scales the whole piece proportionally from there). With no marks, keep the
   // user's current slider value as the flat tempo, exactly as before.
-  if (hasTempoMarks) state.autoScroll.bpm = bpmPerSystem[0];
+  if (openingBpm != null) state.autoScroll.bpm = openingBpm;
   state.autoScroll.bpmBase = state.autoScroll.bpm;
+
+  // Build sections from the RAW (unrefined) per-system estimate -- measure-
+  // number refinement happens PER SECTION next (chooseMeasureReadings below),
+  // so a part's own printed numbers never bleed into a neighboring part's
+  // systems. Everything else about a section (name, tempoMarking,
+  // systemBands slice, bpm) is unaffected by which measure-count reading
+  // eventually wins, so this only needs computing once.
+  const rawSections = buildSections({
+    boundaries,
+    systemBands,
+    measuresPerSystem,
+    bpmPerSystem,
+    defaultBeatsPerMeasure: state.autoScroll.beatsPerMeasure,
+    defaultBpm: state.autoScroll.bpm,
+  });
+
+  // Measure counts. For text-layer PDFs there's one reading. For image PDFs the
+  // two OCR methods each yield one; default to whichever read more systems, and
+  // when they disagree keep the other as a switchable alternative (some
+  // engravings suit one method, some the other — the user decides).
+  // measureNumberEntries (the real PDF text layer) is merged into BOTH OCR
+  // candidates rather than being an either/or choice gated on
+  // usedOcrAnywhere — see lib/scoreAssembly.js's chooseMeasureReadings for
+  // the real "mixed document" bug this fixes.
+  const { refinedMeasures, readings } = chooseMeasureReadings({
+    usedOcrAnywhere, measureNumberEntries, ocrEntriesBox, ocrEntriesStrip, measuresPerSystem, rawSections,
+  });
+  state.autoScroll.measureReadings = readings;
 
   state.autoScroll.systemBands = systemBands;
   state.autoScroll.measuresPerSystem = refinedMeasures;
   state.autoScroll.bpmPerSystem = bpmPerSystem;
   state.autoScroll.analyzed = systemBands.length > 0;
-  state.autoScroll.sections = buildSections({
-    boundaries,
-    systemBands,
-    measuresPerSystem: refinedMeasures,
-    bpmPerSystem,
-    defaultBeatsPerMeasure: state.autoScroll.beatsPerMeasure,
-    defaultBpm: state.autoScroll.bpm,
-  });
+  // Re-slice the already-built sections against the FINAL (per-section-
+  // refined) measures rather than rebuilding from scratch -- boundaries,
+  // bpm, tempoMarking and name are all unaffected by which measure-count
+  // reading won.
+  state.autoScroll.sections = rawSections.map((sec) => ({
+    ...sec,
+    measuresPerSystem: refinedMeasures.slice(sec.startSystemIndex, sec.endSystemIndex + 1),
+  }));
   // Attach each section's best-effort detected time signature, if any --
   // never applied automatically (see timeSigDetection.js); the Sections
   // list UI offers it as a suggestion the user can accept or ignore.
@@ -377,24 +503,17 @@ export async function analyzeScore() {
     if (detected) sec.detectedTimeSig = detected;
   });
 
-  const warnings = [];
-  if (!systemBands.length) {
-    warnings.push('No systems were detected — make sure a PDF is loaded and rendered.');
-  } else {
-    const min = Math.min(...refinedMeasures), max = Math.max(...refinedMeasures);
-    if (max - min > Math.max(2, min)) {
-      warnings.push(`Measure counts vary a lot across systems (${min}-${max}) — check the list below, a barline may have been missed or double-counted somewhere.`);
-    }
-  }
+  const warnings = computeWarnings(systemBands.length, refinedMeasures);
 
-  // Distinct tempos in document order (e.g. [86, 128]) for the UI's
-  // "tempo changes detected" note — only meaningful when there's more than one.
-  const tempoSequence = [];
-  if (bpmPerSystem) for (const b of bpmPerSystem) if (b !== tempoSequence[tempoSequence.length - 1]) tempoSequence.push(b);
-
+  // The "tempo changes detected" banner is computed PER SECTION, from each
+  // section's own bpmPerSystem slice (autoScrollUI.js, via
+  // lib/tempoSchedule.js's tempoSequence()) — not from a whole-document
+  // sequence here, so a multi-part document whose parts each reprint the
+  // same tempo structure doesn't look like it oscillates once per part (see
+  // Finding 4 / tempoSchedule.js's tempoSequence() doc comment).
   return {
     systemCount: systemBands.length, measuresPerSystem: refinedMeasures, warnings,
-    sections: state.autoScroll.sections, tempoSequence, usedOcr: usedOcrAnywhere,
-    measureReadings: readings,
+    sections: state.autoScroll.sections, usedOcr: usedOcrAnywhere,
+    measureReadings: readings, rotationOverridesChanged,
   };
 }

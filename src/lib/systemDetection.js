@@ -87,7 +87,27 @@ export function pageSystemsDetailed(rawLineRows) {
     const sizes = grp.map((g) => g.length);
     const counts = {}; let modeSize = sizes[0], best = 0;
     sizes.forEach((s) => { counts[s] = (counts[s] || 0) + 1; if (counts[s] > best) { best = counts[s]; modeSize = s; } });
-    if (modeSize > 1 && best >= grp.length - 1) {       // consistent multi-staff systems
+    // "tolerate at most one non-conforming group" (best >= grp.length - 1) is
+    // VACUOUS when there are only 2 groups: best is always >= 1 for any 2
+    // groups (whichever size wins the tie), so this check could never reject
+    // a 2-way split no matter how mismatched the two sizes were. Confirmed as
+    // a real bug via a real scanned single-staff-part booklet ("Teutonia.pdf",
+    // Full band arrangements folder): a page with 7 solo staves (no real
+    // bracing anywhere in this document) produced gaps of mostly ~90-125 plus
+    // ONE much larger outlier (a scan/binding irregularity, not a real
+    // system-vs-staff distinction), which kmeans2 saw as "bimodal" and split
+    // into exactly 2 groups of sizes 3 and 4 -- accepted as "consistent"
+    // purely because grp.length-1 == 1 == best, even though the two group
+    // sizes plainly don't match. A real multi-staff score reuses the SAME
+    // instrumentation every system, so two real systems on one page should
+    // have the same staff count; requiring exact equality when there are
+    // only 2 groups (instead of "at most one off", which can't discriminate
+    // at n=2) closes this loophole without touching the >=3-group case
+    // (already verified safe against a real 13-page braced quartet file, see
+    // the "tolerates a staff with only 2 of 5 lines detected" test/comment
+    // above) at all.
+    const consistent = grp.length === 2 ? best === 2 : modeSize > 1 && best >= grp.length - 1;
+    if (consistent) {       // consistent multi-staff systems
       return grp.map((g) => ({
         center: mean(g.map((s) => s.center)),
         rowMin: Math.min(...g.map((s) => s.rowMin)),
