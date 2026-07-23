@@ -48,7 +48,7 @@ import { startDevServer } from './lib/devServer.mjs';
 import { loadGroundTruths, loadMeta } from './lib/groundTruth.mjs';
 import { analyzeFile } from './lib/appDriver.mjs';
 import {
-  sectionNameAccuracy, systemCountAccuracy, measuresPerSystemAccuracy, bpmAccuracy,
+  sectionNameAccuracy, systemCountAccuracy, measuresPerSystemAccuracy, bpmAccuracy, mean, stddev,
 } from './lib/scoring.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -195,11 +195,6 @@ function scoreFile(gt, app) {
   };
 }
 
-function mean(nums) {
-  const vals = nums.filter((n) => n != null);
-  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-}
-
 // Summarizes one GROUP of already-scored files (a plain array, no `.error`
 // entries) into the aggregate numbers printed/stored. Split out from
 // `summarize()` below so the same math can run once for "all files," once
@@ -208,16 +203,36 @@ function mean(nums) {
 // vector PDF's real embedded numbers vs. a scan read through tesseract.js),
 // so blending them into one mean was hiding exactly the distinction that
 // matters for deciding where detection work should focus next.
+//
+// Every mean is paired with its own stddev (`lib/scoring.mjs`'s `stddev()`)
+// for the same reason the text-layer/OCR split exists: this corpus is
+// bimodal (roughly half the files are simple single-page pieces that score
+// ~100% and always have; the rest are hard scanned/multi-part files with
+// real, spread-out accuracy) -- a stable mean can silently hide real
+// per-file improvements and a real regression happening at the same time,
+// roughly canceling out in the aggregate (confirmed: this benchmark's own
+// system-count mean sat at ~80% across 6 real commits while individual
+// files moved by 20-45 points in BOTH directions underneath it). A high
+// stddev next to the mean is the signal that a single number isn't the
+// whole story, without having to pull the per-file breakdown every time.
 function summarizeGroup(scoredGroup) {
   const measuresComparable = scoredGroup.filter((f) => f.measuresPerSystemComparable);
+  const sysCounts = scoredGroup.map((f) => f.systemCountAccuracy);
+  const secNames = scoredGroup.map((f) => f.sectionNameAccuracy);
+  const measures = measuresComparable.map((f) => f.measuresPerSystemAccuracy);
+  const bpms = scoredGroup.map((f) => f.bpmAccuracy);
   return {
     scoredFiles: scoredGroup.length,
-    meanSystemCountAccuracy: mean(scoredGroup.map((f) => f.systemCountAccuracy)),
-    meanSectionNameAccuracy: mean(scoredGroup.map((f) => f.sectionNameAccuracy)),
+    meanSystemCountAccuracy: mean(sysCounts),
+    stddevSystemCountAccuracy: stddev(sysCounts),
+    meanSectionNameAccuracy: mean(secNames),
+    stddevSectionNameAccuracy: stddev(secNames),
     measuresPerSystemComparableFiles: measuresComparable.length,
-    meanMeasuresPerSystemAccuracy: mean(measuresComparable.map((f) => f.measuresPerSystemAccuracy)),
+    meanMeasuresPerSystemAccuracy: mean(measures),
+    stddevMeasuresPerSystemAccuracy: stddev(measures),
     meanMeasuresPerSystemMeanAbsError: mean(measuresComparable.map((f) => f.measuresPerSystemMeanAbsError)),
-    meanBpmAccuracy: mean(scoredGroup.map((f) => f.bpmAccuracy)),
+    meanBpmAccuracy: mean(bpms),
+    stddevBpmAccuracy: stddev(bpms),
     totalBpmSpuriousCount: scoredGroup.reduce((a, f) => a + (f.bpmSpuriousCount || 0), 0),
   };
 }
@@ -240,12 +255,19 @@ function pct(x) {
   return x == null ? 'n/a' : `${(x * 100).toFixed(1)}%`;
 }
 
+// "80.6% ± 24.3%" -- omits the ± entirely when there's nothing to compute it
+// from (0-1 files), rather than printing a misleading "± 0.0%".
+function pctWithSpread(meanVal, stddevVal, n) {
+  if (meanVal == null) return 'n/a';
+  return n > 1 ? `${pct(meanVal)} ± ${(stddevVal * 100).toFixed(1)}%` : pct(meanVal);
+}
+
 function printGroupSummary(label, s) {
   console.log(`\n-- ${label} (${s.scoredFiles} files) --`);
-  console.log(`System count accuracy:      ${pct(s.meanSystemCountAccuracy)}`);
-  console.log(`Section name accuracy:      ${pct(s.meanSectionNameAccuracy)}`);
-  console.log(`Measures/system accuracy:   ${pct(s.meanMeasuresPerSystemAccuracy)} (MAE ${s.meanMeasuresPerSystemMeanAbsError ?? 'n/a'}, ${s.measuresPerSystemComparableFiles}/${s.scoredFiles} files comparable)`);
-  console.log(`BPM sequence accuracy:      ${pct(s.meanBpmAccuracy)} (${s.totalBpmSpuriousCount} total spurious values)`);
+  console.log(`System count accuracy:      ${pctWithSpread(s.meanSystemCountAccuracy, s.stddevSystemCountAccuracy, s.scoredFiles)}`);
+  console.log(`Section name accuracy:      ${pctWithSpread(s.meanSectionNameAccuracy, s.stddevSectionNameAccuracy, s.scoredFiles)}`);
+  console.log(`Measures/system accuracy:   ${pctWithSpread(s.meanMeasuresPerSystemAccuracy, s.stddevMeasuresPerSystemAccuracy, s.measuresPerSystemComparableFiles)} (MAE ${s.meanMeasuresPerSystemMeanAbsError ?? 'n/a'}, ${s.measuresPerSystemComparableFiles}/${s.scoredFiles} files comparable)`);
+  console.log(`BPM sequence accuracy:      ${pctWithSpread(s.meanBpmAccuracy, s.stddevBpmAccuracy, s.scoredFiles)} (${s.totalBpmSpuriousCount} total spurious values)`);
 }
 
 function printSummary(s) {

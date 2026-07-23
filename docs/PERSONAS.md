@@ -1099,6 +1099,33 @@ Two real, opposite-valence findings this makes concrete rather than anecdotal:
   as a real, unresolved gap rather than steady progress, and is the most promising place to look
   next if section-name accuracy on scanned booklets specifically is a priority.
 
+**Every mean in the benchmark's output now ships with its own population stddev** (`scoring.mjs`'s
+`stddev()`, `run.mjs`'s `summarizeGroup()`, `report.mjs`'s trend table) -- found necessary
+because the flat-looking ~80% system-count mean above was hiding real movement in BOTH directions
+underneath it: per-file trend data (not shown in the table above, but pulled directly from the
+snapshots) shows System count stddev sits at a consistent ~26-27 points on that 80% mean across
+every commit, and section-name stddev is wider still (37-45 points) -- confirming this corpus is
+genuinely bimodal (~20 simple single-page files scoring 99-100% since the very first commit
+measured, unchanged; ~19 hard files with real, spread-out, independently-moving accuracy). Two
+concrete findings this same per-file digging surfaced, from data the aggregate alone would never
+have revealed:
+- **A real regression, not just a gap: Fantastic Parade's own system-count accuracy has gotten
+  WORSE across this history (93%→93%→68%→68%→68%→48%)**, with the second, sharpest drop landing
+  exactly on last session's own staff-density fix (`c18988e`) -- that fix was correctly verified
+  against its 4 target files (Teutonia/MonogramMarch/Fat Burger/KingCotton all improved and were
+  confirmed unchanged elsewhere), but no independent ground truth existed for Fantastic Parade at
+  the time, so its rising raw count (417→480) read as progress against its OWN prior count when it
+  was actually overshooting relative to the true 315 -- exactly the kind of miss real ground truth
+  (not just "did the count go up") is for. Not yet investigated further or fixed.
+- **A completely untouched, wide-spread bug**: a cluster of IMSLP trio "Score and Parts" files
+  (Cuban Dancer 44%, Mystery Man 41%, Waltz Trio 51%, Running Scared 59%, My Happy Life 62%,
+  Melancholic 57%, Arno Andiam 14%, and East Meets West at **0%** -- the single worst file in the
+  entire corpus) have shown byte-identical system-count accuracy across all 6 commits measured,
+  meaning none of the rotation/section/staff-density work done across this whole span ever touched
+  whatever is over-counting systems on these specific, otherwise-clean vector files. Given how many
+  files this affects and that it's never been looked at, this is likely the single highest-leverage
+  unexplored investigation in the current backlog. Not yet investigated.
+
 ---
 
 ## 4. Audio DSP / Music Information Retrieval Engineer

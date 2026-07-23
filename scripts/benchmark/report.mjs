@@ -13,8 +13,18 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
 const SNAPSHOTS_DIR = path.join(REPO_ROOT, 'benchmarks', 'snapshots');
 
-function pct(x) {
-  return x == null ? 'n/a' : `${(x * 100).toFixed(1)}%`;
+// "80.6±24.3" -- compact (no % signs, no spaces around ±) so the trend
+// table's columns stay a readable width across 4 metrics x 6+ snapshots. See
+// scoring.mjs's stddev() for why this is worth showing at all: this corpus
+// is bimodal (roughly half the files are simple pieces that always score
+// ~100%, the rest are hard files with real spread), so a stable-looking mean
+// can hide real per-file movement in both directions underneath it -- a wide
+// spread next to the mean is the tell that the per-file breakdown is worth
+// checking for that row.
+function pctSpread(meanVal, stddevVal, n) {
+  if (meanVal == null) return 'n/a';
+  const meanStr = (meanVal * 100).toFixed(1);
+  return n > 1 ? `${meanStr}±${(stddevVal * 100).toFixed(1)}` : meanStr;
 }
 
 function loadSnapshots() {
@@ -42,10 +52,10 @@ function pad(str, width) {
 // for deciding where detection work should focus next -- see this file's own
 // three calls to this function in main().
 function printGroupTable(label, snapshots, groupKey) {
-  console.log(`\n=== ${label} ===`);
+  console.log(`\n=== ${label} (mean ± population stddev across files) ===`);
   const cols = [
     ['Date', 12], ['Commit', 9], ['Files', 7],
-    ['SysCount', 9], ['SecName', 9], ['Measures', 9], ['BPM', 9],
+    ['SysCount', 13], ['SecName', 13], ['Measures', 13], ['BPM', 13],
   ];
   console.log(cols.map(([name, w]) => pad(name, w)).join(' '));
   console.log(cols.map(([, w]) => '-'.repeat(w)).join(' '));
@@ -56,10 +66,10 @@ function printGroupTable(label, snapshots, groupKey) {
       pad(new Date(snap.commitDate).toISOString().slice(0, 10), 12),
       pad((snap.commitHash || '').slice(0, 7), 9),
       pad(g.scoredFiles ?? '?', 7),
-      pad(pct(g.meanSystemCountAccuracy), 9),
-      pad(pct(g.meanSectionNameAccuracy), 9),
-      pad(pct(g.meanMeasuresPerSystemAccuracy), 9),
-      pad(pct(g.meanBpmAccuracy), 9),
+      pad(pctSpread(g.meanSystemCountAccuracy, g.stddevSystemCountAccuracy, g.scoredFiles), 13),
+      pad(pctSpread(g.meanSectionNameAccuracy, g.stddevSectionNameAccuracy, g.scoredFiles), 13),
+      pad(pctSpread(g.meanMeasuresPerSystemAccuracy, g.stddevMeasuresPerSystemAccuracy, g.measuresPerSystemComparableFiles), 13),
+      pad(pctSpread(g.meanBpmAccuracy, g.stddevBpmAccuracy, g.scoredFiles), 13),
     ];
     console.log(row.join(' '));
   }

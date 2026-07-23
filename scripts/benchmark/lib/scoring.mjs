@@ -76,6 +76,41 @@ export function measuresPerSystemAccuracy(truthMeasures, appMeasures) {
   return { fraction: exact / n, meanAbsError: absErrSum / n };
 }
 
+// Mean, ignoring null/undefined entries (a per-file metric that wasn't
+// comparable for that file -- e.g. measuresPerSystemAccuracy when system
+// counts didn't match -- shouldn't silently count as a 0 in the aggregate).
+// Returns null when nothing was left to average.
+export function mean(nums) {
+  const vals = nums.filter((n) => n != null);
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+// POPULATION standard deviation (divide by N, not N-1) of the same
+// null-filtered values `mean()` uses -- this corpus IS the entire dataset
+// being measured, not a random sample estimating some larger population, so
+// population stddev is the statistically correct choice here, not a
+// reflexive N-1. Returns null under the same "nothing to measure" condition
+// mean() does (needs at least 1 value; 1 value alone gives stddev 0, not
+// null, which is correct -- there's no spread in a single data point, that's
+// different from having no data at all).
+//
+// This exists specifically because a single mean can hide a real, actionable
+// story: this benchmark's own corpus is bimodal (roughly half the files are
+// simple single-page pieces that score ~100% and always have, the other half
+// are hard scanned/multi-part files with real, spread-out accuracy) -- a
+// stable ~80% mean turned out to be masking both real per-file improvements
+// AND a real regression happening at the same time, roughly canceling out in
+// the aggregate. A high stddev next to that mean is the signal that a single
+// number isn't telling the whole story and the per-file breakdown is worth
+// checking, without requiring that breakdown to be pulled every time.
+export function stddev(nums) {
+  const vals = nums.filter((n) => n != null);
+  if (!vals.length) return null;
+  const m = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const variance = vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length;
+  return Math.sqrt(variance);
+}
+
 // BPM accuracy: fraction of ground-truth tempo values the app's detected
 // tempo sequence contains, order-preserving, plus a flat count of spurious
 // extra values the app reported that don't correspond to any ground-truth

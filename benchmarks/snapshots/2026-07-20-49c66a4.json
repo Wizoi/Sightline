@@ -6339,31 +6339,43 @@
     "overall": {
       "scoredFiles": 39,
       "meanSystemCountAccuracy": 0.8063989780433611,
+      "stddevSystemCountAccuracy": 0.2752905729549359,
       "meanSectionNameAccuracy": 0.6382478632478632,
+      "stddevSectionNameAccuracy": 0.4212978436174875,
       "measuresPerSystemComparableFiles": 20,
       "meanMeasuresPerSystemAccuracy": 0.030923913043478257,
+      "stddevMeasuresPerSystemAccuracy": 0.09038517334436823,
       "meanMeasuresPerSystemMeanAbsError": 6.845182737126471,
       "meanBpmAccuracy": 0.4358974358974359,
+      "stddevBpmAccuracy": 0.4958738360465055,
       "totalBpmSpuriousCount": 0
     },
     "textLayer": {
       "scoredFiles": 39,
       "meanSystemCountAccuracy": 0.8063989780433611,
+      "stddevSystemCountAccuracy": 0.2752905729549359,
       "meanSectionNameAccuracy": 0.6382478632478632,
+      "stddevSectionNameAccuracy": 0.4212978436174875,
       "measuresPerSystemComparableFiles": 20,
       "meanMeasuresPerSystemAccuracy": 0.030923913043478257,
+      "stddevMeasuresPerSystemAccuracy": 0.09038517334436823,
       "meanMeasuresPerSystemMeanAbsError": 6.845182737126471,
       "meanBpmAccuracy": 0.4358974358974359,
+      "stddevBpmAccuracy": 0.4958738360465055,
       "totalBpmSpuriousCount": 0
     },
     "ocr": {
       "scoredFiles": 0,
       "meanSystemCountAccuracy": null,
+      "stddevSystemCountAccuracy": null,
       "meanSectionNameAccuracy": null,
+      "stddevSectionNameAccuracy": null,
       "measuresPerSystemComparableFiles": 0,
       "meanMeasuresPerSystemAccuracy": null,
+      "stddevMeasuresPerSystemAccuracy": null,
       "meanMeasuresPerSystemMeanAbsError": null,
       "meanBpmAccuracy": null,
+      "stddevBpmAccuracy": null,
       "totalBpmSpuriousCount": 0
     }
   }
