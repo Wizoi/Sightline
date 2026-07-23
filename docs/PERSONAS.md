@@ -1099,6 +1099,54 @@ Two real, opposite-valence findings this makes concrete rather than anecdotal:
   as a real, unresolved gap rather than steady progress, and is the most promising place to look
   next if section-name accuracy on scanned booklets specifically is a priority.
 
+**Investigated (2026-07-23, follow-up session) -- root-caused with real evidence, but NOT fixed
+this round (a diagnosis + proposed direction, per this session's own explicit "don't rush a fix"
+instruction): why `detectMeasureNumberResets()` barely fires on Teutonia/MonogramMarch/KingCotton/
+Fat Burger despite being purpose-built for exactly this case.**
+- **It's not a `detectMeasureNumberResets` logic problem at all -- it's that the OCR pipeline feeding
+  it is producing almost no usable data for the vast majority of these documents.** Dumped the real
+  entries feeding it on Teutonia (a temporary debug hook, reverted): only the first 12 of 79 systems
+  (the systems with a genuine PDF text layer -- this file is a real MIXED document, as already
+  documented) have any real measure-number entry at all; of the remaining 67 systems (85% of the
+  document), OCR produced **zero** usable BOX entries and only **2** usable STRIP entries, total,
+  across all 18 OCR-fallback pages on this file. `detectMeasureNumberResets` has nothing to detect a
+  reset FROM for 85% of the document -- not a threshold or algorithm gap.
+- **Root cause of the OCR starvation, confirmed by saving and visually inspecting the actual box
+  crops sent to Tesseract (not assumed from confidence numbers alone): `locateMeasureNumber()`'s
+  "topmost ink blob in the left margin above the staff" heuristic is confidently finding a box on
+  nearly every system (`nBoxesLocated` ≈ `nSystems` on every page checked) -- but the crops
+  themselves are consistently NOT measure numbers.** Real saved crops showed, variously: actual
+  music notation (noteheads/stems), a clef/key-signature cluster, a rehearsal-mark/repeat bracket,
+  and (on one page) the instrument's own printed name label ("Eb CLAR..."). Tesseract's confidence
+  on these genuinely-non-number crops is correctly near-zero (observed 0-1 against a `minConfidence
+  = 55` gate) -- the confidence gate is working exactly as designed, rejecting garbage rather than
+  fabricating a number; the real gap is one step upstream, in what gets handed to it.
+- **Working theory, not yet verified against the source engraving directly: this scanned corpus's
+  actual print convention may not put a measure number above every system at all** (older
+  public-domain band-part booklets often number only every 5-10 measures, or only at a line/page
+  break) -- unlike the modern notation-software exports `locateMeasureNumber` was built and
+  validated against, where a number is printed every system. If true, the "topmost ink above the
+  staff" heuristic has nothing real to find on most systems and will always grab the nearest
+  unrelated ink instead; no confidence threshold or reset-detection tweak downstream can fix an
+  upstream location failure like this.
+- **Proposed next step, not attempted here**: before touching `locateMeasureNumber` or
+  `detectMeasureNumberResets` again, render and visually inspect a handful of real full pages from
+  this specific corpus (not just the cropped boxes) to confirm/deny the working theory above -- if
+  numbers really are sparse in the source engraving, the realistic fix is accepting that most
+  systems on this class of scanned booklet will never have a real printed-number reading (the
+  barline-count fallback already handles this gracefully) rather than chasing a location heuristic
+  that has nothing reliable to locate; if numbers ARE present every system but positioned/sized
+  differently than this heuristic assumes, the fix is a geometry adjustment to `locateMeasureNumber`
+  specifically calibrated against THIS corpus's real crops, the same way `pad=20`/`minFrac=0.95`
+  were calibrated against their own real target files.
+- **Teutonia's "TRIO" false positive (also asked about in this same investigation) is explained by
+  the data that DOES exist, not a new bug**: the 12 real text-layer entries show a genuine, cleanly-
+  read drop (measure 31 -> 3) right where the piece's Trio strain begins -- `detectMeasureNumberResets`
+  and `plausibleSectionSpan` both behave exactly as designed on this real data (ratio 76/73 = 1.04,
+  comfortably above the 0.5 threshold); the boundary is real and correctly detected, it's just a
+  formal-structure marker rather than an instrument change, exactly as already documented above. Nothing
+  to fix here specifically -- it's a correct detection of a real, if differently-typed, boundary.
+
 **Every mean in the benchmark's output now ships with its own population stddev** (`scoring.mjs`'s
 `stddev()`, `run.mjs`'s `summarizeGroup()`, `report.mjs`'s trend table) -- found necessary
 because the flat-looking ~80% system-count mean above was hiding real movement in BOTH directions
@@ -1125,6 +1173,132 @@ have revealed:
   whatever is over-counting systems on these specific, otherwise-clean vector files. Given how many
   files this affects and that it's never been looked at, this is likely the single highest-leverage
   unexplored investigation in the current backlog. Not yet investigated.
+
+**Both regressions above were root-caused and fixed in the same follow-up session (2026-07-23),
+via the same "dump real gap data before touching thresholds" discipline as every prior fix in this
+section, plus two smaller findings (section-splitting on Fantastic Parade, and a Clarinet-1/2
+naming bug) that fell out of the same investigation:**
+
+- **Fantastic Parade fix: the n=2 grouping-consistency exact-match rule (the Teutonia fix, above)
+  had a second real shape it didn't cover.** Dumping the real, complete per-page ink rows for
+  Fantastic Parade's 9 combined-score pages (all 9 are byte-identical in raw layout -- a repeating
+  template) showed each page's real 20-staff brace (winds panel, then brass panel) plus ONE
+  separately-notated percussion staff produces exactly 2 kmeans2 groups of sizes `[20, 1]` --
+  rejected by the exact-match rule (`20 !== 1`), falling the WHOLE page back to 21 one-staff
+  systems and destroying the correctly-detected 20-staff brace along with it. A naive first fix
+  ("a size-1 group can never itself be inconsistent, so accept pairing it with anything") was tried
+  and found genuinely UNSAFE by git-stash A/B against the 4 regression-guard files: real scanned
+  single-staff booklets (no bracing anywhere) can ALSO produce a `[N, 1]` split from ordinary scan/
+  binding noise isolating an edge staff (e.g. Teutonia p.9's real gaps `[212.3, 118.3, 112, 120.4,
+  106.3]` -> sizes `[1, 5]`), and the naive rule wrongly merged those real, separate solo staves
+  into one fake system (confirmed: 5 real systems collapsed into a 474-row blob). **Fixed** by
+  gating the singleton exception on the non-singleton side being LARGE (`MIN_BRACE_SIZE_FOR_
+  SINGLETON_EXCEPTION = 15`) -- calibrated against real data, not guessed: across all 4 regression-
+  guard files' real pages, the worst false-positive "big" side topped out at size 9 (Fat Burger
+  p.31); Fantastic Parade's real case is 20. 15 sits with real margin on both sides. **Verified**:
+  all 4 regression-guard files byte-for-byte unchanged (79/157/209/265 systems); Fantastic Parade's
+  real (ground-truth-confirmed) system count went from 480 down to **309** against a true 315 --
+  system-count accuracy 47.6%→**98.1%** via the committed benchmark tool itself (single-file run,
+  before/after).
+- **Fantastic Parade's zero section splits, investigated in the same pass, turned out to be a
+  SEPARATE bug (not fixed by the system-count fix) with the same root shape already documented
+  above for `collectKnownNames`'s "Oboes 8 J" compromise.** On this real file, its compact
+  left-margin layout puts literally EVERY instrument's own time-signature glyph noise onto the same
+  row as that instrument's name (not just Oboes) -- so `collectKnownNames` collected almost nothing
+  usable ("Oboes 8 J", "Clarinet 1 in B b 8 J", etc.), and since `findSectionTitle`'s match test
+  only ever checks whether a LATER page's row STARTS WITH the stored name, a trailing-contaminated
+  name can never re-match a later page's own clean text at all -- this is exactly the "lesser-harm
+  tradeoff" the original fix accepted, just never revisited to see how often it actually bites.
+  **Fixed** by recognizing a structural fact confirmed on this real file: real notation software
+  draws a complete instrument name as ONE pdfjs text item (`"Alto Saxophone 1"`, `"Clarinet 2 in
+  B"`, etc. are each already a single item, never built word-by-word) -- so `groupIntoRows` now
+  also exposes each row's own leftmost item's text (`firstItemText`) alongside the existing full
+  joined `text`, and `collectKnownNames` adds it as a SECOND candidate name whenever it differs.
+  Harmless when a row is already clean (the two are identical, deduped by the existing `seen` set)
+  and harmless for a genuinely separate multi-line label (each of its own rows' first item is
+  already that whole row). **Verified**: section-name accuracy on this one file went from
+  4.2%→**58.3%** (Score + 20 of 23 real named instrument parts, up from Score alone) -- the 3
+  missing are percussion staves, a real, different, already-documented notation convention (they
+  sit below system 0's own band so never qualify as `isFull`, not a regression from this fix).
+- **IMSLP trio over-counting fix: the `kmeans2` bimodality PRE-FILTER (`>= 0.3`), not the grouping-
+  consistency check itself, was the actual blocker -- and it was never validated against a real
+  multi-page combined score, only guessed.** Dumping real gap data for the worst files (East Meets
+  West, Cuban Dancer Trio, Spanish Winds Trio, and 5 more) showed an extremely consistent real
+  shape: a combined score's own title page (generous spacing, 1 system per page) groups fine (ratio
+  0.7-0.8), but its CONTINUATION pages (4 systems/page, less breathing room) measure a real
+  within-brace-vs-between-system gap ratio of only **0.20-0.26** -- comfortably bimodal to a human
+  looking at the page (4 clean groups of exactly 3 staves, every time), but below the 0.3 gate, so
+  these pages never even attempted grouping and fell back to one system per staff (12 "systems"
+  instead of the real 4). **A flat lowering of the gate was tried first and found UNSAFE** by the
+  same git-stash A/B discipline: on the real scanned single-staff regression-guard files, ordinary
+  scan noise can ALSO clear a lowered gate (Teutonia p.16 measures 0.189; MonogramMarch p.7 measures
+  0.251) and then get accepted by the EXISTING `>=3`-group "tolerate one non-conforming group" rule,
+  which a near-uniform noise pattern can satisfy by coincidence (both pages happened to split into
+  sizes `[1, 2, 2]` -- two accidental "pairs"). That tolerance is legitimate and already verified
+  safe at the ORIGINAL 0.3 gate (a real 13-page braced quartet file), so removing it wasn't an
+  option. **Fixed** with a two-tier gate instead: a weak signal (0.15-0.3) is only trusted when the
+  resulting grouping is PERFECT (every group exactly the same size, no tolerance, no singleton
+  exception either) -- a real combined score's repeated bracing clears this easily (4 groups of
+  exactly 3), while noise-driven near-uniform splits on a real single-staff booklet don't. A strong
+  signal (>= 0.3) keeps its existing tolerance untouched. **Verified with real before/after
+  evidence**: East Meets West 27→**11** (exact match to ground truth's 11, 0%→100%), Cuban Dancer
+  Trio 67→**43** (exact match to 43), Mystery Man 65→**41** (exact match), Waltz Trio 122→**82**
+  (exact match), Running Scared 111→**79** (exact match), Melancholic Trio 107→**75** (exact
+  match) -- 6 of 8 previously-broken files now land EXACTLY on ground truth. My Happy Life improved
+  (58→50 against a true 42) but not exactly, and Arno Andiam Romanza (13, true 7) was unaffected --
+  both have a genuinely irregular per-system staff count in the real engraving (confirmed via their
+  own gap data: not every system on the page has the same instrumentation, e.g. a piano-only
+  passage mixed with piano+clarinet systems), which this fix's deliberately-strict "must be
+  perfectly uniform" requirement correctly declines to force a match for rather than risk a false
+  positive -- a genuine, accepted residual, not a new bug. All 4 regression-guard files (Teutonia/
+  MonogramMarch/KingCotton/Fat Burger) confirmed byte-for-byte unchanged throughout both fixes.
+- **A third, smaller, independently-discovered bug fixed in the same pass: `findSectionTitle`
+  returned the matched KNOWN NAME's text, not the matched ROW's own (more specific) text --
+  confirmed causing "B♭ Clarinet 1" and "B♭ Clarinet 2" to both get named plain "B♭ Clarinet"** on
+  several real IMSLP trio files (the exact bug the OMR persona's own backlog flagged as suspected
+  but unconfirmed). Root cause: a combined score's braced Clarinet-1/Clarinet-2 staves print the
+  SAME unnumbered label beside each ("B♭ Clarinet" -- the reader tells them apart by position, not
+  a printed numeral), so `collectKnownNames`' dedup only ever keeps ONE generic entry; each part's
+  own opening page DOES print its real numbered name ("B♭ Clarinet 1"/"2"), and both correctly
+  match the generic entry via `startsWith` -- but the function then returned the STORED (generic)
+  name for both, discarding the numeral. Since a match is only ever accepted when the row's text
+  equals or extends the known name (never the reverse), the row's own text is always at least as
+  specific -- returning it instead is strictly safe. **Fixed** (`findSectionTitle` now returns
+  `row.text`) and verified via 6 new/existing unit tests (no existing test relied on the old
+  `match.text` return distinguishing from `row.text`, confirming this was a real, previously
+  untested gap rather than a deliberate design choice).
+- **Regression coverage**: 4 new real-corpus-derived tests in `systemDetection.test.js` (the
+  Fantastic Parade merge, the Teutonia false-positive guard, the East Meets West weak-gate merge,
+  and the MonogramMarch weak-gate false-positive guard, all using literal real dumped row data) and
+  4 new tests in `scoreText.test.js`/`scoreText.js` (firstItemText candidate collection, and the
+  row-text-not-match-text return) -- 285 tests total (up from 277), all passing.
+- **Verified against the FULL 39-file real corpus via the committed benchmark tool itself** (not
+  just the targeted files above), run.mjs's own summary, before (committed `c18988e`) vs. after
+  (this session's fixes, uncommitted):
+  ```
+                              Overall              | Text-layer          | Scanned/OCR
+              SysCount SecName Measures BPM        | SysCount SecName    | SysCount SecName
+  Before      80.6%    72.2%   81.7%    96.8%      | 81.4%    81.7%      | 76.7%    28.6%
+  After       92.9%    72.5%   83.8%    96.8%      | 96.3%    82.1%      | 77.6%    28.6%
+  ```
+  System-count accuracy is the standout, real, corpus-wide jump (+12.3pp overall, +14.9pp on
+  text-layer files specifically) -- exactly the two fixes above's real, intended effect, not
+  overfitting to the handful of files directly targeted. A second, unplanned but very real
+  knock-on benefit: measures-per-system is only ever comparable when system count matches ground
+  truth EXACTLY (see this benchmark's own scoring design), so fixing system count on ~8 more files
+  raised the comparable-file count from 20/39 to 28/39, which is most of why measures-per-system
+  accuracy also rose (81.7%→83.8%) despite no measure-counting logic being touched this session.
+  Section-name accuracy barely moved in the AGGREGATE (72.2%→72.5%) despite two real per-file wins
+  (Fantastic Parade 4.2%→58.3%; several IMSLP trio files gaining their correct Clarinet-1/2 split) --
+  expected, since both are large, real improvements diluted across a 39-file mean, not evidence the
+  fixes are small. OCR section-name accuracy is confirmed unchanged (28.6%→28.6%), exactly as
+  expected: item 3 above was investigated and root-caused but deliberately NOT fixed this round (a
+  diagnosis + proposed direction, not a rushed fix, per this session's own instruction) -- OCR
+  system-count nudged up slightly (76.7%→77.6%, within its own stddev) from unrelated small
+  variation on one of the 3 non-"Full band arrangements" OCR files, not from anything touched this
+  session (the 4 Full-band-arrangements regression-guard files were independently confirmed
+  byte-for-byte unchanged throughout, per the git-stash A/B evidence above). All 39 files scored
+  with 0 errors both before and after.
 
 ---
 

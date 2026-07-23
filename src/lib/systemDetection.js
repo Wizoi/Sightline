@@ -95,7 +95,50 @@ export function pageSystemsDetailed(rawLineRows) {
   const gaps = [];
   for (let i = 1; i < sc.length; i++) gaps.push(sc[i] - sc[i - 1]);
   const [lo, hi] = kmeans2(gaps);
-  if ((hi - lo) / Math.max(lo, 1) >= 0.3) {           // gaps look bimodal → maybe grouped
+  const bimodalRatio = (hi - lo) / Math.max(lo, 1);
+  // 0.3 was never validated against a real multi-page combined score, only
+  // guessed -- found too high on a real "Score and Parts"-style IMSLP corpus
+  // (a whole cluster of trio files, e.g. "East Meets West", "Cuban Dancer
+  // Trio"): a combined score's CONTINUATION pages (more systems per page than
+  // its own opening page, so less breathing room between them) real
+  // within-brace vs. between-system gap ratio measures as low as 0.20-0.26
+  // across many real pages/files -- comfortably bimodal to a human looking at
+  // the rendered page, but below this gate, so those pages never even
+  // attempted grouping and fell back to one system per staff (e.g. 12 solo-
+  // looking "systems" instead of the real 4 three-staff systems).
+  //
+  // Simply lowering this gate everywhere was tried first and found UNSAFE by
+  // the same git-stash A/B discipline as the fixes below: on the real
+  // "Full band arrangements" regression-guard files (scanned single-staff
+  // booklets, NO real bracing anywhere), a page's naturally-varying scan
+  // noise can ALSO clear a lowered gate (e.g. Teutonia p.16's real gaps
+  // [112.7, 104.3, 124.5, 95.2] measure 0.189; MonogramMarch p.7 measures
+  // 0.251) and then get accepted by the >=3-group branch's existing
+  // "tolerate one non-conforming group" tolerance, which a near-uniform
+  // noise pattern can satisfy by accident (these two pages both produced
+  // groups of size [1, 2, 2] -- two coincidental "pairs" -- which the
+  // tolerant rule can't tell apart from a real repeated 2-staff brace).
+  // That tolerance is legitimate and already verified safe at the ORIGINAL
+  // 0.3 gate (a real 13-page braced quartet file), so the fix isn't to
+  // remove it -- it's to only extend the LOWERED gate's benefit to splits
+  // that don't need that tolerance at all. A real combined score's own
+  // repeated bracing is much stronger evidence than "noise happened to look
+  // bimodal": every real system on a page uses the SAME instrumentation, so
+  // a genuine multi-staff page groups into PERFECTLY equal-sized groups
+  // (confirmed on the real IMSLP trio pages: 4 groups of exactly 3, every
+  // time) with no exceptions needed. So a WEAK bimodal signal (0.15-0.3) is
+  // only trusted when the resulting grouping is perfect (every group the
+  // same size); the original 0.3 gate keeps its existing tolerance
+  // (including the n=2 exact-match and singleton-brace rules below) for a
+  // STRONG signal. Verified via git-stash A/B against all four real
+  // regression-guard files: with this two-tier gate, Teutonia p.16 and
+  // MonogramMarch p.7 (the two pages a flat lowered gate broke) are
+  // confirmed byte-for-byte back to their original ungrouped state, while
+  // the real IMSLP trio pages (ratio 0.20-0.26, perfectly uniform groups)
+  // still correctly merge.
+  const WEAK_BIMODAL_RATIO = 0.15;
+  const STRONG_BIMODAL_RATIO = 0.3;
+  if (bimodalRatio >= WEAK_BIMODAL_RATIO) {           // gaps look bimodal → maybe grouped
     // group staffInfo the same way clusterVals would group sc, but carrying
     // the full staff records along so extents survive the grouping.
     const cutoff = (lo + hi) / 2;
@@ -127,7 +170,57 @@ export function pageSystemsDetailed(rawLineRows) {
     // (already verified safe against a real 13-page braced quartet file, see
     // the "tolerates a staff with only 2 of 5 lines detected" test/comment
     // above) at all.
-    const consistent = grp.length === 2 ? best === 2 : modeSize > 1 && best >= grp.length - 1;
+    // A SECOND real n=2 shape, found on a real 20+-instrument conductor's
+    // score ("Full band arrangements/Fantastic Parade.pdf"): one lone staff
+    // (a percussion staff notated on its own, never braced with the winds/
+    // brass ensemble above it) sits right after the page's one real big
+    // system, producing exactly 2 groups of sizes [20, 1] -- rejected by the
+    // exact-match rule above (20 !== 1), which fell the WHOLE page back to
+    // 21 separate one-staff systems, destroying the correctly-detected
+    // 20-staff brace along with it (confirmed directly: this file's real
+    // system count went from the true 315 to 480, almost entirely from this
+    // one page shape repeating across all 9 of its real combined-score
+    // pages).
+    //
+    // A size-1 group can never itself be internally "inconsistent," but a
+    // naive "singleton pairs with anything" rule was tried first and found
+    // UNSAFE by the same git-stash A/B discipline as the fix above: on the
+    // real scanned single-staff booklets this project already treats as
+    // regression guards (Teutonia/MonogramMarch/KingCotton/Fat Burger --
+    // NO real bracing anywhere in any of them), several pages show this
+    // EXACT [N, 1] shape too, purely from scan/binding noise (one outlier
+    // gap happening to isolate an edge staff) -- e.g. Teutonia p.9's real
+    // gaps [212.3, 118.3, 112, 120.4, 106.3] split into sizes [1, 5], and
+    // accepting that merged 5 genuinely separate solo staves into one fake
+    // system spanning 474 (of a 1200-row canvas). The false-positive "big"
+    // side topped out at size 9 (Fat Burger p.31) across all four files'
+    // real pages -- nowhere close to Fantastic Parade's real 20. Gating the
+    // exception on the non-singleton side being LARGE (>= MIN_BRACE_SIZE)
+    // exploits that real, verified gap: this app already fixes every page
+    // to the same ah=1200 analysis canvas (see scoreAnalysis.js), so "20+
+    // staves detected in one page-local group" is a comfortably rare, high-
+    // confidence signal specific to a genuinely huge conductor-score brace,
+    // not something ordinary scan noise on a solo-part booklet plausibly
+    // produces. 15 sits with real margin above the worst confirmed false
+    // positive (9) and real margin below the confirmed genuine case (20) --
+    // same calibration discipline as this file's other real thresholds.
+    // Verified via git-stash A/B against all four real regression-guard
+    // files: every one of the 15 false-positive pages found while
+    // developing this fix (5 more than shown above, across all 4 files)
+    // stays correctly un-merged with this gate in place, while Fantastic
+    // Parade's 9 real combined-score pages still correctly merge.
+    const MIN_BRACE_SIZE_FOR_SINGLETON_EXCEPTION = 15;
+    const isSingletonPlusGroup = grp.length === 2 && sizes.includes(1)
+      && sizes.some((s) => s >= MIN_BRACE_SIZE_FOR_SINGLETON_EXCEPTION);
+    // A weak signal (didn't clear the original 0.3 gate) only gets the
+    // STRICT form of each check -- perfect equality, no "tolerate one off"
+    // and no singleton exception (Fantastic Parade's real case clears 0.3
+    // comfortably on its own, so it never needs the weak band) -- see the
+    // bimodalRatio doc comment above for why.
+    const strong = bimodalRatio >= STRONG_BIMODAL_RATIO;
+    const consistent = grp.length === 2
+      ? (best === 2 || (strong && isSingletonPlusGroup))
+      : (strong ? modeSize > 1 && best >= grp.length - 1 : best === grp.length);
     if (consistent) {       // consistent multi-staff systems
       return grp.map((g) => ({
         center: mean(g.map((s) => s.center)),

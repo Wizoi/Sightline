@@ -30,6 +30,19 @@ describe('groupIntoRows', () => {
     expect(rows[0].text).toBe('Clarinet in B 1');
   });
 
+  it('also exposes the row\'s own leftmost item text separately from the full joined text', () => {
+    // Real notation software draws a complete instrument name as ONE pdfjs
+    // text item (confirmed on a real conductor's score) -- collectKnownNames
+    // relies on this leftmost-item text surviving row merging separately
+    // from the full joined text, so a later, UNRELATED item merged onto the
+    // same row (e.g. a time-signature glyph at nearly the same y) can't
+    // corrupt it.
+    const items = [item('Clarinet in B', 39.1, 691.1), item('1', 81.2, 691.1)];
+    const rows = groupIntoRows(items);
+    expect(rows[0].firstItemText).toBe('Clarinet in B');
+    expect(rows[0].text).toBe('Clarinet in B 1');
+  });
+
   it('drops glyph noise that happens to decode to punctuation, not just empty strings', () => {
     // A real, surprising finding: some music-engraving glyphs (staccato
     // dots, spacers) decode to ordinary-looking "." or whitespace rather
@@ -220,6 +233,29 @@ describe('collectKnownNames', () => {
     const rows = [{ x: 39, y: 691, text: 'Oboes 8 J' }];
     expect(collectKnownNames(rows, firstSystem)).toEqual([{ text: 'Oboes 8 J', isFull: true }]);
   });
+
+  it('ALSO collects the row\'s own leftmost item text as a second, clean candidate, when it differs (real "Fantastic Parade" bug)', () => {
+    // Real notation software draws a complete instrument name as ONE text
+    // item (confirmed: "Alto Saxophone 1" etc. are each a single item, never
+    // built word-by-word) -- groupIntoRows attaches that item's own text as
+    // `firstItemText` alongside the full joined `text`. On the real file
+    // this fixes, EVERY instrument's row.text got contaminated with a
+    // trailing time-signature glyph ("Oboes 8 J"), which permanently
+    // blocked matching against every later page's own clean "Oboes ..."
+    // row (a prefix check only ever matches FORWARD, never past trailing
+    // noise). Recovering the clean "Oboes" as a second candidate is what
+    // lets that later page's title still match.
+    const rows = [{ x: 39, y: 691, text: 'Oboes 8 J', firstItemText: 'Oboes' }];
+    expect(collectKnownNames(rows, firstSystem)).toEqual([
+      { text: 'Oboes 8 J', isFull: true },
+      { text: 'Oboes', isFull: true },
+    ]);
+  });
+
+  it('does not add a duplicate candidate when firstItemText equals the full row text (the common, uncontaminated case)', () => {
+    const rows = [{ x: 39, y: 691, text: 'Bass Clarinet', firstItemText: 'Bass Clarinet' }];
+    expect(collectKnownNames(rows, firstSystem)).toEqual([{ text: 'Bass Clarinet', isFull: true }]);
+  });
 });
 
 describe('findSectionTitle', () => {
@@ -283,6 +319,29 @@ describe('findSectionTitle', () => {
     const items = [item('Andante', 82, 684), item('Bass Clarinet', 39, 728)];
     const rows = [{ x: 39, y: 728, text: 'Bass Clarinet' }, { x: 216, y: 739, text: 'Juggling Clowns' }];
     expect(findSectionTitle(items, rows, mixed)).toBe('Bass Clarinet');
+  });
+
+  it('returns the MATCHED ROW\'s own (more specific) text, not the stored known name (real "Score and Parts" bug: Clarinet 1/2 both named identically)', () => {
+    // Real bug found on several real IMSLP "Score and Parts" files: a
+    // combined score braces two same-instrument staves ("Clarinet 1",
+    // "Clarinet 2") but prints the SAME unnumbered label beside each ("B
+    // Clarinet") -- the reader tells them apart by position, not a printed
+    // numeral -- so collectKnownNames' dedup only ever keeps one generic
+    // "B Clarinet" knownName. Each part's own opening page DOES print its
+    // real, distinguishing numbered name ("B Clarinet 1", "B Clarinet 2"),
+    // and both match (row.text.startsWith(knownName.text)) -- but returning
+    // the stored knownName's text named BOTH parts identically ("B
+    // Clarinet"), losing the numeral. The row's own text is always at least
+    // as specific as what it matched against, so returning it instead fixes
+    // this for both parts without needing two different knownNames.
+    const generic = [{ text: 'B Clarinet', isFull: true }];
+    const items1 = [item('Andante', 82, 684), item('B Clarinet 1', 28, 748)];
+    const rows1 = [{ x: 28, y: 748, text: 'B Clarinet 1' }];
+    expect(findSectionTitle(items1, rows1, generic)).toBe('B Clarinet 1');
+
+    const items2 = [item('Andante', 82, 684), item('B Clarinet 2', 28, 748)];
+    const rows2 = [{ x: 28, y: 748, text: 'B Clarinet 2' }];
+    expect(findSectionTitle(items2, rows2, generic)).toBe('B Clarinet 2');
   });
 });
 

@@ -156,6 +156,85 @@ describe('pageSystems', () => {
     expect(systems.map((s) => Math.round(s.rowMin))).toEqual([459, 601]);
     expect(systems.map((s) => Math.round(s.rowMax))).toEqual([471, 613]);
   });
+
+  it('merges a big real brace + one unrelated lone staff (real corpus bug/fix, Fantastic Parade.pdf p.1)', () => {
+    // Real, complete dumped ink rows from page 1 of "Full band arrangements/
+    // Fantastic Parade.pdf": a 20-staff conductor's-score brace (winds, then
+    // brass) plus one separately-notated percussion staff. This whole page
+    // used to fall back to 21 one-staff systems (grp sizes [20, 1] rejected
+    // by the exact-size-match rule) -- confirmed as the real cause of this
+    // file's system count regressing from a true 315 to 480. Must now merge
+    // into exactly 2 systems: the 20-staff brace, and the lone staff on its
+    // own (never merged INTO the brace -- it's genuinely a different staff).
+    const rows = [
+      120, 121, 123, 124, 126, 127, 130, 133, 163, 166, 169, 172, 175, 205, 208, 211, 214, 217, 218,
+      247, 248, 250, 251, 253, 254, 256, 257, 259, 260, 289, 290, 292, 293, 295, 296, 298, 299, 301, 302,
+      332, 335, 338, 341, 344, 374, 377, 380, 383, 386, 416, 419, 422, 425, 426, 428, 429,
+      458, 459, 461, 462, 464, 465, 467, 468, 470, 471, 500, 501, 503, 504, 506, 507, 510, 513,
+      561, 564, 567, 570, 573, 603, 604, 606, 607, 609, 610, 612, 613, 615, 616,
+      645, 646, 648, 649, 651, 652, 654, 655, 657, 658, 687, 688, 691, 694, 697, 700,
+      730, 733, 736, 739, 742, 772, 775, 778, 779, 781, 782, 784, 785,
+      814, 815, 817, 818, 820, 821, 823, 824, 826, 827, 856, 857, 859, 860, 862, 863, 865, 866, 868, 869,
+      899, 902, 905, 908, 911, 941, 944, 947, 950, 953,
+      998, 999, 1034, 1035, 1040, 1041, 1047, // the lone percussion staff
+      1086, 1089, 1092, 1095, 1098,
+    ];
+    const systems = pageSystemsDetailed(rows);
+    expect(systems).toHaveLength(2);
+    expect(Math.round(systems[0].rowMin)).toBe(121);
+    expect(Math.round(systems[0].rowMax)).toBe(953);
+  });
+
+  it('does NOT merge a real single-staff booklet page just because scan noise produces the same [N, 1] shape (real corpus regression guard, Teutonia.pdf p.9)', () => {
+    // Real dumped ink rows from a scanned single-staff-part booklet with NO
+    // real bracing anywhere in the document. A scan/binding irregularity
+    // (not a real system-vs-staff distinction) makes the gaps look bimodal
+    // with sizes [1, 5] -- the SAME shape as the Fantastic Parade fix above
+    // -- but here the "big" side is only 5 staves, nowhere near a genuine
+    // full-ensemble brace, so it must stay 6 separate one-staff systems.
+    const rows = [
+      240, 346, 357, 379, 455, 499, 562, 584, 669, 680, 691, 703, 713, 714,
+      777, 811, 822, 918, 929, 930, 1024, 1036,
+    ];
+    expect(pageSystemsDetailed(rows)).toHaveLength(6);
+  });
+
+  it('groups real IMSLP "Score and Parts" continuation pages whose bimodal ratio is too weak for the original 0.3 gate (real corpus bug, East Meets West / Cuban Dancer Trio / etc.)', () => {
+    // Real dumped ink rows from a combined-score continuation page (4 real
+    // systems, each 3 braced staves: Flute/Clarinet/Clarinet) -- the real
+    // between-system gap is only ~0.21-0.26x bigger than the within-system
+    // gap at this page's density, well under the original 0.3 gate, so this
+    // whole page used to fall back to 12 separate one-staff "systems"
+    // instead of the real 4 three-staff ones. This exact page shape was
+    // byte-identical (0% system-count accuracy) across the whole project's
+    // history until this fix.
+    const rows = [
+      95, 96, 103, 110, 111, 118, 126, 175, 182, 183, 190, 198, 205, 206,
+      254, 255, 262, 269, 270, 277, 278, 285, 352, 353, 360, 367, 368, 375, 382, 383,
+      432, 439, 440, 447, 454, 455, 462, 511, 512, 519, 526, 527, 534, 542,
+      609, 617, 624, 625, 632, 639, 640, 689, 696, 697, 704, 711, 712, 719,
+      768, 769, 776, 783, 784, 791, 798, 799, 866, 873, 874, 881, 889, 896, 897,
+      945, 946, 953, 961, 968, 969, 976, 1030, 1031, 1038, 1045, 1046, 1053, 1060, 1061,
+    ];
+    const systems = pageSystemsDetailed(rows);
+    expect(systems).toHaveLength(4);
+  });
+
+  it('does NOT let the weak bimodal gate group near-uniform single-staff-booklet noise, even when it happens to look pairwise "consistent" (real corpus regression guard, MonogramMarch.pdf p.7)', () => {
+    // Real dumped ink rows from ANOTHER single-staff booklet with no real
+    // bracing. Its naturally-varying scan spacing clears the lowered 0.15
+    // gate (ratio ~0.25) and, unlike the Teutonia case above, happens to
+    // split into groups of size [1, 2, 2] -- superficially "consistent" by
+    // the >=3-group tolerant rule's own mode-based logic -- but this is
+    // still 5 genuinely separate solo staves, not a real 2-staff brace
+    // repeated twice. The weak gate must require a PERFECT (not tolerant)
+    // match, so this must stay 5 separate one-staff systems.
+    const rows = [
+      237, 357, 368, 380, 402, 403, 484, 485, 496, 508, 520,
+      629, 630, 641, 652, 664, 746, 769, 780, 781, 875, 886, 887, 1000,
+    ];
+    expect(pageSystemsDetailed(rows)).toHaveLength(5);
+  });
 });
 
 describe('pageSystemsDetailed', () => {

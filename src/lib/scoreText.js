@@ -72,6 +72,18 @@ export function groupIntoRows(items, rowEps = 2) {
       y: r.firstY,
       x: Math.min(...rowItems.map((it) => it.x)),
       text: rowItems.map((it) => it.str.trim()).join(' ').replace(/\s+/g, ' ').trim(),
+      // The row's OWN leftmost item's text, kept alongside the full joined
+      // `text` above -- see collectKnownNames' use of this. Real notation
+      // software draws a complete instrument name as ONE text run (confirmed
+      // on a real 20+-instrument conductor's score: "Alto Saxophone 1",
+      // "Clarinet 2 in B", etc. are each already a single item, not built
+      // word-by-word), so this is usually just `text` again. It only differs
+      // when something ELSE (never part of the real name) shares this row's
+      // y and got joined on: most commonly a time-signature glyph sitting at
+      // nearly the same y as a compact left-margin name label (see the
+      // "6 J"/"b J" note below) -- that noise is always a SEPARATE item
+      // appended after the name, never part of it.
+      firstItemText: rowItems[0].str.trim(),
     };
   });
 }
@@ -183,6 +195,12 @@ function hasRealNameShape(text) {
 // all) -- in that case nothing above the page can be excluded and every
 // remaining candidate is treated as isFull (the old, pre-tagging behavior),
 // same as when topSystemY was null before this function distinguished forms.
+function isCandidateName(text, minLength) {
+  if (!text || text.length < minLength) return false;
+  if (TEMPO_WORDS.includes(text) || /^\d+$/.test(text)) return false;
+  return hasRealNameShape(text);
+}
+
 export function collectKnownNames(pageRows, firstSystem, { leftMarginX = 120, minLength = 2, pad = 30 } = {}) {
   const topY = firstSystem ? firstSystem.yTop : null;
   const bottomY = firstSystem ? firstSystem.yBottom : null;
@@ -191,14 +209,36 @@ export function collectKnownNames(pageRows, firstSystem, { leftMarginX = 120, mi
   for (const row of pageRows) {
     if (row.x >= leftMarginX) continue;
     if (topY != null && row.y > topY + pad) continue;
-    const text = row.text;
-    if (!text || text.length < minLength) continue;
-    if (TEMPO_WORDS.includes(text) || /^\d+$/.test(text)) continue;
-    if (!hasRealNameShape(text)) continue;
-    if (seen.has(text)) continue;
-    seen.add(text);
     const isFull = bottomY == null || row.y >= bottomY;
-    names.push({ text, isFull });
+
+    if (isCandidateName(row.text, minLength) && !seen.has(row.text)) {
+      seen.add(row.text);
+      names.push({ text: row.text, isFull });
+    }
+
+    // A compact left-margin layout can put an unrelated glyph (most often a
+    // time-signature digit) at nearly the same y as a real instrument-name
+    // label, so groupIntoRows -- correctly, by its own row-merge rules --
+    // joins them into one row ("Oboes 8 J"). Real notation software draws a
+    // complete instrument name as ONE text item (confirmed on a real 20+-
+    // instrument conductor's score: "Alto Saxophone 1", "Clarinet 2 in B",
+    // etc. are each already a single item, never built word-by-word), so
+    // the row's own leftmost item's text (row.firstItemText) is usually
+    // just the SAME, clean, uncontaminated name even when the full joined
+    // row.text got noise appended after it. Adding it as a SECOND candidate
+    // (rather than replacing row.text) recovers the name for later
+    // prefix-matching (findSectionTitle) on this exact real file, where the
+    // joined-row text's trailing noise otherwise permanently blocks every
+    // future match: "Oboes 8 J" is never a prefix of a later page's clean
+    // "Oboes ..." row, but "Oboes" alone is. Harmless when row.text is
+    // already clean (firstItemText then just duplicates it, caught by the
+    // `seen` check) and harmless for a genuinely multi-line label like
+    // "Piccolo/" + "Flute" on separate rows (each row's own first item IS
+    // already that row's whole text, so this adds nothing new there either).
+    if (row.firstItemText !== row.text && isCandidateName(row.firstItemText, minLength) && !seen.has(row.firstItemText)) {
+      seen.add(row.firstItemText);
+      names.push({ text: row.firstItemText, isFull });
+    }
   }
   return names;
 }
@@ -222,12 +262,25 @@ export function collectKnownNames(pageRows, firstSystem, { leftMarginX = 120, mi
 // name (per the same "full once, abbreviated after" engraving convention
 // collectKnownNames relies on) -- so requiring isFull filters out the
 // false-positive continuation-page trigger without losing any real one.
+//
+// Returns the MATCHED ROW's own text, not the stored knownName's text --
+// found to matter on several real "Score and Parts" IMSLP files where a
+// combined score's braced staves for "Clarinet 1"/"Clarinet 2" print the
+// SAME unnumbered label ("B♭ Clarinet") beside each staff (the reader tells
+// them apart by position, not by a printed numeral), so collectKnownNames'
+// dedup only ever keeps ONE generic "B♭ Clarinet" knownName -- but each
+// part's own opening page (this function's actual match target) DOES print
+// its real, distinguishing numbered name ("B♭ Clarinet 1", "B♭ Clarinet 2").
+// Since a match is only ever accepted when the row's text equals or starts
+// with the known name (never the reverse), the row's own text is always at
+// least as specific -- returning it instead of match.text is strictly safe
+// and fixes both parts being named identically.
 export function findSectionTitle(pageItems, pageRows, knownNames, { leftMarginX = 120 } = {}) {
   if (!hasTempoMarking(pageItems)) return null;
   for (const row of pageRows) {
     if (row.x >= leftMarginX) continue;
     const match = knownNames.find((n) => n.isFull && (row.text === n.text || row.text.startsWith(n.text)));
-    if (match) return match.text;
+    if (match) return row.text;
   }
   return null;
 }
