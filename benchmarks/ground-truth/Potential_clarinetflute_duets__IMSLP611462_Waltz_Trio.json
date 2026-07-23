@@ -1,0 +1,22 @@
+{
+  "file": "Potential clarinetflute duets/IMSLP611462-PMLP983313-The_Waltz_Trio-Score_and_Parts.pdf",
+  "pageCount": 12,
+  "sections": [
+    { "name": "Score", "startPage": 1, "isGeneric": false },
+    { "name": "Flute", "startPage": 7, "isGeneric": false },
+    { "name": "B♭ Clarinet 1", "startPage": 9, "isGeneric": false },
+    { "name": "B♭ Clarinet 2", "startPage": 11, "isGeneric": false }
+  ],
+  "totalSystems": 82,
+  "measuresPerSystem": [
+    7, 6, 7, 7, 8, 7, 4, 4, 4, 5, 6, 6, 6, 4, 5, 6, 6, 6, 6, 4, 4, 4, 4,
+    7, 6, 6, 8, 8, 6, 6, 5, 6, 5, 6, 7, 5, 5, 8, 8, 7, 6, 5, 6,
+    11, 9, 7, 7, 6, 5, 3, 3, 4, 5, 7, 7, 5, 6, 7, 7, 7, 7, 8, 5,
+    9, 8, 8, 7, 8, 6, 7, 10, 7, 9, 6, 7, 7, 8, 5, 4, 4, 4, 2
+  ],
+  "tempoMarks": [
+    { "bpm": 110, "atSystem": 0 },
+    { "bpm": 100, "atSystem": 22 }
+  ],
+  "timeSignature": "3/4"
+}

@@ -1,0 +1,22 @@
+{
+  "file": "Potential clarinetflute duets/IMSLP609605-PMLP980381-Mystery_Man-Score_and_Parts.pdf",
+  "pageCount": 7,
+  "sections": [
+    { "name": "Score", "startPage": 1, "isGeneric": false },
+    { "name": "Flute", "startPage": 5, "isGeneric": false },
+    { "name": "B♭ Clarinet 1", "startPage": 6, "isGeneric": false },
+    { "name": "B♭ Clarinet 2", "startPage": 7, "isGeneric": false }
+  ],
+  "totalSystems": 41,
+  "measuresPerSystem": [
+    6, 7, 6, 4, 5, 7, 6, 6, 6, 6, 4, 4, 7, 7, 4,
+    6, 13, 5, 14, 9, 11, 5, 5, 17,
+    13, 11, 10, 14, 8, 10, 10, 9,
+    12, 9, 9, 8, 9, 9, 10, 8, 11
+  ],
+  "tempoMarks": [
+    { "bpm": 115, "atSystem": 0 },
+    { "bpm": 95, "atSystem": 14 }
+  ],
+  "timeSignature": "4/4"
+}

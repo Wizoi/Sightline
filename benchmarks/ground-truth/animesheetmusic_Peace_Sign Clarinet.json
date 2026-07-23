@@ -1,0 +1,36 @@
+{
+  "file": "animesheetmusic/Peace_Sign Clarinet.pdf",
+  "pageCount": 2,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 15,
+  "measuresPerSystem": [
+    6,
+    6,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    4,
+    4
+  ],
+  "tempoMarks": [
+    {
+      "bpm": 200,
+      "atSystem": 0
+    }
+  ],
+  "timeSignature": "4/4"
+}

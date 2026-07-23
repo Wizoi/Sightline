@@ -1,0 +1,42 @@
+{
+  "file": "animesheetmusic/Dance_In_The_Game Trumpet.pdf",
+  "pageCount": 2,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 21,
+  "measuresPerSystem": [
+    3,
+    3,
+    8,
+    4,
+    4,
+    3,
+    5,
+    4,
+    4,
+    3,
+    3,
+    8,
+    3,
+    3,
+    4,
+    4,
+    5,
+    4,
+    5,
+    4,
+    6
+  ],
+  "tempoMarks": [
+    {
+      "bpm": 135,
+      "atSystem": 0
+    }
+  ],
+  "timeSignature": "4/4"
+}

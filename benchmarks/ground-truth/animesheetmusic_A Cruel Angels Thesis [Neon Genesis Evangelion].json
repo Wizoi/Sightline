@@ -1,0 +1,37 @@
+{
+  "file": "animesheetmusic/A Cruel Angel’s Thesis [Neon Genesis Evangelion].pdf",
+  "pageCount": 2,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 12,
+  "measuresPerSystem": [
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4
+  ],
+  "tempoMarks": [
+    {
+      "bpm": 86,
+      "atSystem": 0
+    },
+    {
+      "bpm": 128,
+      "atSystem": 1
+    }
+  ],
+  "timeSignature": "4/4"
+}

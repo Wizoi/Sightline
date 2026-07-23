@@ -1,0 +1,39 @@
+{
+  "file": "randomclarinet/takefive.pdf",
+  "pageCount": 2,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 23,
+  "measuresPerSystem": [
+    15,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    3,
+    88,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4
+  ],
+  "tempoMarks": [],
+  "timeSignature": "5/4"
+}

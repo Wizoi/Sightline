@@ -1,0 +1,22 @@
+{
+  "file": "Potential clarinetflute duets/IMSLP609601-PMLP980372-The_Cuban_Dancer_Trio-Score_and_Parts.pdf",
+  "pageCount": 7,
+  "sections": [
+    { "name": "Score", "startPage": 1, "isGeneric": false },
+    { "name": "Flute", "startPage": 5, "isGeneric": false },
+    { "name": "B♭ Clarinet 1", "startPage": 6, "isGeneric": false },
+    { "name": "B♭ Clarinet 2", "startPage": 7, "isGeneric": false }
+  ],
+  "totalSystems": 43,
+  "measuresPerSystem": [
+    6, 8, 8, 9, 6, 11, 12, 13, 10, 5, 7, 7, 7, 7, 5,
+    7, 10, 17, 18, 14, 15, 7, 10, 17, 6,
+    13, 10, 13, 22, 15, 15, 11, 11, 11,
+    11, 13, 10, 13, 30, 11, 15, 10, 8
+  ],
+  "tempoMarks": [
+    { "bpm": 130, "atSystem": 0 },
+    { "bpm": 115, "atSystem": 14 }
+  ],
+  "timeSignature": "3/4"
+}

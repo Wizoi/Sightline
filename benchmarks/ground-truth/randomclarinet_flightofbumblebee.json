@@ -1,0 +1,24 @@
+{
+  "file": "randomclarinet/flightofbumblebee.pdf",
+  "pageCount": 1,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 8,
+  "measuresPerSystem": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    3
+  ],
+  "tempoMarks": [],
+  "timeSignature": "2/4"
+}

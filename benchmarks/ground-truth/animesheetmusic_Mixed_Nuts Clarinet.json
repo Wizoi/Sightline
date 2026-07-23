@@ -1,0 +1,54 @@
+{
+  "file": "animesheetmusic/Mixed_Nuts Clarinet.pdf",
+  "pageCount": 3,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 33,
+  "measuresPerSystem": [
+    10,
+    4,
+    4,
+    5,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    3,
+    3,
+    3,
+    3,
+    3,
+    4,
+    3,
+    3,
+    3,
+    4,
+    4,
+    3
+  ],
+  "tempoMarks": [
+    {
+      "bpm": 150,
+      "atSystem": 0
+    }
+  ],
+  "timeSignature": "4/4"
+}

@@ -1,0 +1,21 @@
+{
+  "file": "Potential clarinetflute duets/Melancholic/IMSLP563175-PMLP907323-The_Melancholic_Trio-Score_and_Parts.pdf",
+  "pageCount": 12,
+  "sections": [
+    { "name": "Score", "startPage": 1, "isGeneric": false },
+    { "name": "Flute", "startPage": 7, "isGeneric": false },
+    { "name": "Oboe", "startPage": 9, "isGeneric": false },
+    { "name": "B♭ Clarinet", "startPage": 11, "isGeneric": false }
+  ],
+  "totalSystems": 75,
+  "measuresPerSystem": [
+    7, 8, 8, 7, 8, 8, 8, 6, 6, 6, 7, 7, 6, 6, 6, 7, 7, 6, 5, 6, 6, 7,
+    7, 12, 9, 11, 8, 7, 7, 6, 7, 8, 7, 7, 6, 10, 9, 13, 8, 6,
+    10, 8, 10, 9, 8, 8, 7, 7, 7, 11, 10, 11, 8, 11, 8, 8, 7,
+    10, 8, 7, 6, 10, 9, 8, 6, 7, 6, 13, 7, 11, 8, 7, 7, 10, 8
+  ],
+  "tempoMarks": [
+    { "bpm": 90, "atSystem": 0 }
+  ],
+  "timeSignature": "6/8"
+}

@@ -1,0 +1,36 @@
+{
+  "file": "Potential clarinetflute duets/IMSLP664320-PMLP1065933-East_Meets_West.pdf",
+  "pageCount": 3,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 11,
+  "measuresPerSystem": [
+    6,
+    8,
+    10,
+    12,
+    10,
+    7,
+    7,
+    9,
+    7,
+    5,
+    4
+  ],
+  "tempoMarks": [
+    {
+      "bpm": 105,
+      "atSystem": 0
+    },
+    {
+      "bpm": 80,
+      "atSystem": 10
+    }
+  ],
+  "timeSignature": "4/4 (changes to 3/4 at measure 19, back to 4/4 at measure 64)"
+}

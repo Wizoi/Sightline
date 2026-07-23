@@ -1,0 +1,42 @@
+{
+  "file": "animesheetmusic/63aadca5-1d0b-4e59-99d1-f5aa15df51e0.pdf",
+  "pageCount": 2,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 21,
+  "measuresPerSystem": [
+    11,
+    7,
+    7,
+    8,
+    10,
+    7,
+    9,
+    5,
+    8,
+    9,
+    7,
+    8,
+    9,
+    8,
+    7,
+    6,
+    8,
+    10,
+    8,
+    10,
+    5
+  ],
+  "tempoMarks": [
+    {
+      "bpm": 160,
+      "atSystem": 0
+    }
+  ],
+  "timeSignature": "4/4"
+}

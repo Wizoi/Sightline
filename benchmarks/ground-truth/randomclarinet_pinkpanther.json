@@ -1,0 +1,21 @@
+{
+  "file": "randomclarinet/pinkpanther.pdf",
+  "pageCount": 1,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 5,
+  "measuresPerSystem": [
+    4,
+    4,
+    4,
+    4,
+    3
+  ],
+  "tempoMarks": [],
+  "timeSignature": "4/4"
+}

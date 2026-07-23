@@ -1,0 +1,21 @@
+{
+  "file": "MalcolmBill-JugglingClowns (1).pdf",
+  "pageCount": 13,
+  "sections": [
+    { "name": "Score", "startPage": 1, "isGeneric": false },
+    { "name": "Clarinet in B♭ 1", "startPage": 6, "isGeneric": false },
+    { "name": "Clarinet in B♭ 2", "startPage": 8, "isGeneric": false },
+    { "name": "Alto Clarinet", "startPage": 10, "isGeneric": false },
+    { "name": "Bass Clarinet", "startPage": 12, "isGeneric": false }
+  ],
+  "totalSystems": 94,
+  "measuresPerSystem": [
+    5, 7, 6, 7, 4, 3, 4, 4, 6, 5, 5, 5, 3, 3, 4, 5, 5, 4, 5,
+    6, 5, 7, 7, 8, 4, 4, 5, 4, 4, 4, 4, 5, 4, 5, 6, 5, 3,
+    4, 5, 5, 6, 5, 4, 3, 3, 3, 4, 5, 4, 5, 5, 3, 2, 2, 4, 6, 5, 7,
+    5, 5, 5, 5, 5, 7, 5, 5, 5, 5, 6, 5, 4, 5, 5, 5, 5, 3,
+    4, 5, 5, 5, 10, 4, 4, 4, 5, 4, 4, 5, 5, 4, 5, 5, 5, 7
+  ],
+  "tempoMarks": [],
+  "timeSignature": "4/4"
+}

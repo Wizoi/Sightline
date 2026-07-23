@@ -930,6 +930,175 @@ fully deleted afterward — no `public/*.pdf` copies, no committed binaries):**
   project's standing discipline: dump the real data and look at the real rendered page before
   concluding a problem is unfixable, don't stop at the first plausible-sounding root cause.
 
+**A committed, repeatable accuracy benchmark now exists (2026-07-23) — `scripts/benchmark/`
+(`run.mjs`, `backfill.mjs`, `report.mjs`), replacing "re-verify by hand every time" with a trend
+you can track across commits.** Built and tested against a small hand-made placeholder plus
+whatever real ground-truth files the parallel corpus-labeling effort had already produced at the
+time (see QA persona for the full infra write-up) — two real findings worth recording here since
+they're about this domain's own data shapes, not just test-runner mechanics:
+- **The real ground-truth schema the labeling agents converged on independently** (`sections:
+  [{name, startPage, isGeneric}]`, `totalSystems`, `tempoMarks`) **differs from what a
+  from-scratch design would guess** (flat `sectionNames`/`systemCount`/`tempoBpms` arrays) — found
+  only because two real labeled files already existed in `benchmarks/ground-truth/` by the time
+  this was built, and were read before finalizing the loader rather than assumed. General lesson,
+  same shape as this project's "read the real getTextContent() output before coding against it"
+  precedent: when a schema is being produced by parallel work, inspect real instances of it before
+  committing to your own guess, even under time pressure to keep moving.
+- **A single-section file's implicit section is always named `"Score"`** — both by
+  `buildSections()`'s own fallback (`i === 0 ? 'Score' : ...`) and, independently, by the
+  labeling agents' own convention (confirmed on real ground-truth files) — even though the app's
+  `#sectionsSelect` dropdown never renders at all for this, by far the most common, case (see this
+  section's "Sections are saved snapshots" note above on why the UI stays hidden here). The
+  benchmark's DOM-only driver (`scripts/benchmark/lib/appDriver.mjs`) scores this hidden-dropdown
+  state as the app having reported `['Score']`, not `[]` — scoring it as `[]` would have wrongly
+  zeroed out section-name accuracy on every ordinary correctly-behaving single-part file, the
+  overwhelming majority of this app's real target audience (Music Educator persona).
+
+**A dev/benchmark-only "force OCR" validation pass (2026-07-23) — measuring OCR's real measure-
+number-reading accuracy against trusted ground truth, not just on scanned files where ground truth
+itself is lower-confidence:**
+- **Motivation:** `ocrPageNumbers()`'s OCR fallback normally only ever runs on scanned/image-only
+  pages, exactly where this project's own ground truth is *also* least confident (scan quality
+  makes the "true" measure numbers themselves harder for a human labeler to verify — see the
+  Lazarus/KingCotton ground-truth files' own confidence caveats above). Text-layer PDFs give a
+  controlled way to measure "how good is OCR alone at reading printed measure numbers," using
+  numbers this project is much more confident about, by deliberately forcing every page's
+  measure-number reading down the OCR path even though a real text layer exists, then scoring
+  against the SAME ground truth the normal (text-layer) pass already gets scored against.
+- **Mechanism chosen: a URL query parameter (`?forceOcr=1`), read fresh once per `analyzeScore()`
+  call via `location.search`** (`isForceOcrRequested()` in `scoreAnalysis.js`), folded into the
+  existing per-page decision as `const usedOcr = (forceOcr || !pageItems.some(...)) &&
+  systemsOnThisPage.length > 0`. Chosen over a hidden UI toggle or a build-time flag specifically
+  because it's real, working production code (not a test-only stub or monkeypatch) while staying
+  genuinely inert for a real user — nothing in the UI reads or sets it, there's no visible
+  control, and no ordinary user would ever hand-type `?forceOcr=1` onto the app's URL. The
+  benchmark driver (`scripts/benchmark/lib/appDriver.mjs`'s `withForceOcr()`) just navigates to
+  that URL before clicking Analyze; `analyzeFile()` itself needed zero changes since navigation was
+  already a separate step the caller controlled.
+- **Real, surfaced-during-implementation scoping correction to the original plan: forcing OCR
+  does NOT cleanly touch "measure numbers only" — it also fully suppresses real tempo-mark
+  reading for any page it forces onto the OCR path, for a structural reason, not a new bug.**
+  `extractTempoMarks()` (the real numeric `♩=N` reader) lives in the SAME non-OCR `else` branch as
+  `extractMeasureNumbers()` in `scoreAnalysis.js`'s per-page loop, not a separate call gated
+  independently — so a forced-OCR page loses its tempo marks too, with nothing (there's no
+  OCR-based tempo reading) reading them instead. This is completely harmless for a REAL `usedOcr`
+  page (image-only, so there was never tempo text there to lose) but becomes real the moment a
+  text-layer page is forced onto that path. Section-title matching
+  (`findSectionTitle`/`collectKnownNames`) is genuinely unconditional, as originally assumed —
+  it reads `pageItems` directly, before the `usedOcr` branch. **Net effect, and why the validation
+  script scores only system count + measures-per-system, never section names or BPM:** section
+  names are unaffected either way (nothing to demonstrate); BPM isn't merely "not exercised" the
+  way the original framing assumed, it's actively zeroed out by this mechanism — scoring it would
+  have measured "does forcing OCR delete tempo marks" (trivially yes, every time) rather than
+  anything about OCR quality.
+- **New script: `scripts/benchmark/run-ocr-validation.mjs`** (own npm script,
+  `benchmark:ocr-validation`), reusing `lib/scoring.mjs`, `lib/groundTruth.mjs`, `lib/devServer.mjs`,
+  and the existing `lib/appDriver.mjs` (extended with the one-line `withForceOcr()` helper, not
+  duplicated). For each ground-truth file: runs a normal baseline pass first to confirm THIS run
+  actually has `usedOcr: false` (skips a file that already uses OCR normally — nothing to force
+  away from there), then re-analyzes the same file with `?forceOcr=1` and sanity-checks the app's
+  own summary text actually flips to "No embedded text..." this time (confirms the mechanism
+  genuinely engaged, not just assumed). Writes to `benchmarks/ocr-validation/<date>-<sha>.json` —
+  deliberately NOT `benchmarks/snapshots/`, and `report.mjs`'s per-commit trend table intentionally
+  never reads this directory, since this is a synthetic "what if" probe, not "how the app behaves
+  for real users today."
+- **Real numbers from a full 39-file corpus run (2026-07-23, commit `c18988e`):** 32 of 39
+  ground-truth files have a real text layer in a normal run (the other 7 — the two scanned "Full
+  band arrangements" booklets not yet OCR'd here plus a few others — already use OCR normally and
+  were correctly skipped, nothing to force). Across those 32: **system count accuracy was
+  identical (81.4%) between the normal and forced-OCR pass on every single file** — confirms
+  forcing OCR genuinely doesn't touch system detection at all, exactly as designed (system count
+  comes from pixel/staff detection, upstream of and independent from the measure-number-reading
+  branch). Of those 32, only **18 had the app's own system count exactly matching ground truth**
+  (the other 14 — mostly the IMSLP trio "Score and Parts" files — are a *separate*, pre-existing
+  system-over-detection gap this task didn't investigate further, unrelated to OCR forcing one way
+  or the other) — measures-per-system accuracy is only meaningful on those 18 (see
+  `measuresPerSystemAccuracy`'s own "only comparable when system counts match" design, `scoring.mjs`).
+  On those 18: **real text-layer reading averaged 81.3% exact-match accuracy (mean abs error 0.79
+  measures/system); the SAME 18 files, forced through OCR instead, averaged 71.0% (mean abs error
+  1.22)** — a real, meaningful accuracy gap, but a much smaller one than "OCR barely works at all"
+  would have suggested: most individual files lost roughly 10-30 points of exact-match accuracy
+  (e.g. 95%→76%, 89%→67%, 83%→42%) rather than collapsing, and a few files (the `randomclarinet`
+  folder, `Bouree - Händel`, `A Cruel Angel's Thesis`) scored byte-for-byte IDENTICAL in both passes
+  — those happen to be files where barline-count + refinement already carries most of the correct
+  answer with little contribution from the printed numbers either way, so OCR misreads had nothing
+  to corrupt. One file (`Peace_Sign Clarinet`) actually scored slightly HIGHER under forced OCR
+  (87%→93%) — a reminder that "OCR is strictly worse than the real text layer" is a good average
+  statement, not a guarantee for every individual file.
+- **General lesson for future OMR persona work: a plan's own "which downstream reads get touched"
+  assumption is worth re-deriving from the actual branch structure before building the validation
+  harness around it, even when the assumption sounds obviously right** — the BPM-suppression side
+  effect here wasn't a hidden bug so much as an artifact of `extractTempoMarks()` sharing a branch
+  with `extractMeasureNumbers()` for an unrelated reason (both only make sense to read from a real
+  text layer), but it meant the *actual reason* to exclude BPM from this validation was different
+  (and more interesting) than the reason assumed going in.
+
+**Benchmark suite hardened + a real 6-commit historical trend recorded (2026-07-23).** Two real
+bugs found on the first full-corpus run, both fixed:
+- `scripts/benchmark/lib/appDriver.mjs`'s two `page.waitForFunction(fn, { timeout })` calls passed
+  the options object as the SECOND positional argument -- Playwright treats that as the page
+  function's `arg`, not `options`, silently falling back to its own 30s default regardless of the
+  configured `loadTimeoutMs`/`analyzeTimeoutMs`. This is the exact same argument-order mistake
+  already found and fixed once earlier this project in a hand-written Playwright driver script --
+  confirmed here by the fact it broke in exactly the predicted way (timing out the 3 largest/
+  slowest OCR-fallback files at 30s instead of their real 600s budget). Fixed by passing `undefined`
+  as the third-positional `arg` and moving `{ timeout }` to the real options position.
+- `#autoScrollTempoInfo` is deliberately blank for a flat, non-changing tempo (see
+  `autoScrollUI.js`'s `refreshTempoInfo()`) -- reading only that banner therefore reported `[]`
+  (indistinguishable from "nothing detected") for every single-tempo file in the corpus, even ones
+  the app correctly detected and adopted a real printed tempo for. Fixed by also reading `#bpmV`
+  (`"<n> bpm"`, reflecting `state.autoScroll.bpm`) as a fallback, compared against a baseline
+  captured from a fresh page BEFORE any file was loaded (not an assumed hardcoded default) --
+  BPM sequence accuracy went from 68.6% to 96.8% on the very same data purely from this tooling fix,
+  confirming it was a benchmark blind spot, not a real app deficiency.
+
+**Metrics now segmented by text-layer vs. scanned/OCR PDFs, not just one blended "overall" number**
+(`run.mjs`'s `summarizeGroup()`, `report.mjs`'s per-group tables) -- this was necessary, not
+cosmetic: blending the two regimes was hiding that section-name accuracy on scanned/OCR files
+(28.6%-33.3% across every commit checked) is barely a third of text-layer files' (63.8%-81.7%,
+improving over time) -- see the trend table below.
+
+**`appDriver.mjs` made tolerant of DOM elements that don't exist yet on an old historical commit**
+(`safeEval()`, defaulting to a safe fallback instead of throwing) -- found necessary backfilling
+this project's own two oldest candidate commits: `#autoScrollTempoInfo` didn't exist until a later
+commit (`294d43a`), and `49c66a4`'s Sections picker was still per-row text inputs, not yet the
+`#sectionsSelect` dropdown this driver reads. Without this, both commits failed EVERY one of 39
+files outright, discarding even the system-count data that genuinely did exist and is comparable
+that far back -- full backward compatibility with every historical UI shape (e.g. reading the old
+per-row inputs) was NOT attempted (real, accepted scope limit -- those two commits' `sections`/
+`measures`/`tempo` data stays unrecoverable, but their system-count data isn't wasted anymore).
+
+**Real 6-commit trend, current corpus/scoring logic applied retroactively via `git worktree`**
+(`benchmark:backfill`, then `benchmark:report`) -- picked to span the feature's real evolution:
+
+```
+Date        Commit   Overall: SysCount SecName Measures BPM   | Text-layer SecName/Measures | OCR SecName/Measures
+2026-07-20  49c66a4  80.6%    63.8%    3.1%    43.6%          | 63.8% / 3.1%   (no OCR yet)  | n/a
+2026-07-20  89bab60  81.9%    65.9%    66.0%   43.6%          | 65.9% / 66.0%  (no OCR yet)  | n/a
+2026-07-21  b58b58d  80.3%    65.9%    79.2%   96.8%          | 74.0% / 80.9%                | 28.6% / 63.9%
+2026-07-21  41fa477  80.3%    65.9%    81.4%   96.8%          | 74.0% / 80.9%                | 28.6% / 86.1%
+2026-07-22  1e742bd  81.1%    72.2%    81.7%   96.8%          | 81.7% / 81.3%                | 28.6% / 86.1%
+2026-07-23  c18988e  80.6%    72.2%    81.7%   96.8%          | 81.7% / 81.3%                | 28.6% / 86.1%
+```
+
+Two real, opposite-valence findings this makes concrete rather than anecdotal:
+- **`89bab60`'s own commit message ("fix multi-staff system grouping") is dramatically confirmed**:
+  measures-per-system accuracy jumps from a barely-functional 3.1% to 66.0% in exactly that one
+  commit -- the single largest jump in the whole trend, and it's the correct commit for it.
+  `1e742bd`'s section-name jump (65.9%→72.2% overall, 74.0%→81.7% on text-layer files specifically)
+  likewise lands exactly on the commit that introduced numeric-tempo-mark section detection +
+  measure-number-reset boundaries, as expected.
+- **The scanned/OCR segment's section-name accuracy has not moved AT ALL across every commit that
+  has OCR fallback at all (28.6% flat, `b58b58d` through current `c18988e`)** -- despite real,
+  substantial engineering effort across this exact span specifically targeting this case
+  (measure-number-reset section boundaries, `fillMissingSectionNames`'s real-name-filling, the
+  Item-2/plausible-section-span over-split guard). Consistent with, and now quantifying, this same
+  section's own per-file finding that these fixes added MORE sections to scanned booklets
+  (Teutonia 1→2, etc.) without making them reliably NAMED CORRECTLY (generic labels, or occasionally
+  a wrong boundary like Teutonia's "TRIO") -- this is the one metric in the whole trend that reads
+  as a real, unresolved gap rather than steady progress, and is the most promising place to look
+  next if section-name accuracy on scanned booklets specifically is a priority.
+
 ---
 
 ## 4. Audio DSP / Music Information Retrieval Engineer
@@ -1515,6 +1684,41 @@ not just plausible-looking.
   one specific group-count) or silently miscalibrated, and the only way to find out is to look at
   the actual numbers a real file produces, not to reason from the code alone.
 
+**A committed, repeatable Playwright-driven benchmark now exists (2026-07-23) — a deliberate,
+scoped exception to the "Playwright is ad hoc only" stance above, not a reversal of it.**
+`scripts/benchmark/{run,backfill,report}.mjs` (`playwright-core` now a real, saved
+devDependency — the ad hoc-only rule stays true for the *actual* `npm test` unit suite, which
+stays canvas/DOM-free and untouched) drives the real running app end-to-end (load a real PDF via
+the `#file` input, Analyze, read the DOM) against a growing set of hand/agent-labeled ground-truth
+JSON files under `benchmarks/ground-truth/` (built in parallel by a separate corpus-labeling
+effort — see the OMR persona's own note on the real schema those files converged on), scores
+per-file accuracy on four dimensions (section names, system count, measures-per-system, detected
+BPM sequence), and writes a dated, commit-tagged snapshot under `benchmarks/snapshots/` —
+`report.mjs` reads every snapshot and prints a trend table. `backfill.mjs` retroactively applies
+today's scoring logic to ~6 hand-picked historical commits (via real `git worktree`s, each with its
+own npm install + dev server) so the trend has more than one data point immediately. This directly
+narrows the open question below for the pixel/rendering-dependent half specifically **once the real
+ground truth is filled in and the benchmark is actually run** (not yet done as of this writing —
+the real run is a deliberate follow-up step, kept separate from building the infrastructure itself).
+- **Verified working end-to-end**, not just written: a placeholder ground-truth file plus the real
+  ground-truth files already present mid-build were run through `run.mjs` (confirmed sane
+  per-file/aggregate numbers, including the "not directly comparable" system-count-mismatch case
+  correctly producing `null`/`false` rather than a misleading number), `report.mjs` (confirmed
+  correct commit-date sorting across snapshots), and `backfill.mjs` (one real historical commit,
+  `b58b58d`, smoke-tested through the full worktree-add → npm-install → dev-server → run.mjs →
+  worktree-remove pipeline, snapshot correctly tagged with that commit's real historical date, no
+  leftover worktree or listening process afterward) — all test snapshots and the placeholder
+  ground-truth file were deleted afterward, leaving only the real, independently-produced
+  ground-truth files this session found already in progress.
+- **A genuine, Windows-specific tooling bug found only by actually running the tool**: `spawn()`ing
+  `npm` (which resolves to `npm.cmd`, a shell shim, not a real executable) throws `EINVAL` on
+  Windows unless `shell: true` — hit in both `devServer.mjs` (starting `npm run dev`) and
+  `backfill.mjs` (running `npm ci`/`npm install` in a fresh worktree). `git`/`node` invocations,
+  being real executables, needed no such fix. General lesson for any future cross-platform
+  child-process tooling in this repo: a `.cmd`-shimmed command (anything installed as an npm
+  global/local binary on Windows) needs `shell: true` (or an explicit `.cmd` suffix); a real `.exe`
+  does not.
+
 **Open questions / future research:**
 - No current corpus of real (redacted/public-domain) band-part PDFs for regression testing
   detection accuracy over time — tests use generated fixtures, plus the one real user-provided
@@ -1524,7 +1728,13 @@ not just plausible-looking.
   regressions become a recurring problem. The new `pdf-lib`-based in-memory fixture pattern above
   narrows this gap for text-layer logic specifically, but the pixel/rendering-dependent half (staff/
   barline detection) still has no committed real-PDF regression corpus, only literal-array unit
-  tests plus ad hoc Playwright/canvas verification during a session.
+  tests plus ad hoc Playwright/canvas verification during a session. **Update (2026-07-23):** the
+  new `scripts/benchmark/` tool above is the real committed-regression-tracking answer to this once
+  the parallel ground-truth-labeling effort's corpus is complete and a real full run has been done
+  (not yet, as of this writing) — it doesn't replace the `pdf-lib` in-memory fixtures (still the
+  right tool for a fast, isolated unit test of one specific text-layer function) but does close the
+  "detection regressions over time, tracked as a trend, across the WHOLE real corpus" gap this
+  question originally flagged.
 
 ---
 

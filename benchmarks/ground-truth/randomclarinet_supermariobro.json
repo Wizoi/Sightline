@@ -1,0 +1,33 @@
+{
+  "file": "randomclarinet/supermariobro.pdf",
+  "pageCount": 2,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 17,
+  "measuresPerSystem": [
+    2,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4
+  ],
+  "tempoMarks": [],
+  "timeSignature": "4/4"
+}

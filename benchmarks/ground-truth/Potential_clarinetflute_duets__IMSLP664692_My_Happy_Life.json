@@ -1,0 +1,24 @@
+{
+  "file": "Potential clarinetflute duets/IMSLP664692-PMLP1066598-My_Happy_Life-Score_and_Parts.pdf",
+  "pageCount": 7,
+  "sections": [
+    { "name": "Score", "startPage": 1, "isGeneric": false },
+    { "name": "Flute 1", "startPage": 5, "isGeneric": false },
+    { "name": "Flute 2", "startPage": 6, "isGeneric": false },
+    { "name": "B♭ Clarinet", "startPage": 7, "isGeneric": false }
+  ],
+  "totalSystems": 42,
+  "measuresPerSystem": [
+    6, 8, 7, 7, 7, 8, 8, 8, 8, 8, 8, 7, 8, 7,
+    10, 14, 8, 10, 11, 17, 12, 10, 9, 4,
+    9, 14, 13, 12, 14, 10, 10, 10, 13,
+    11, 10, 12, 21, 9, 10, 12, 11, 9
+  ],
+  "tempoMarks": [
+    { "bpm": 82, "atSystem": 0 },
+    { "bpm": 65, "atSystem": 10 },
+    { "bpm": 82, "atSystem": 10 },
+    { "bpm": 65, "atSystem": 13 }
+  ],
+  "timeSignature": "6/8"
+}

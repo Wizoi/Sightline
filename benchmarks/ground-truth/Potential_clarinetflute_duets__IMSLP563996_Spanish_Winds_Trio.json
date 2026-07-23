@@ -1,0 +1,26 @@
+{
+  "file": "Potential clarinetflute duets/IMSLP563996-PMLP908538-The_Spanish_Winds_Trio_-_1-Score_and_Parts.pdf",
+  "pageCount": 12,
+  "sections": [
+    { "name": "Score", "startPage": 1, "isGeneric": false },
+    { "name": "Flute", "startPage": 6, "isGeneric": false },
+    { "name": "B♭ Clarinet 1", "startPage": 8, "isGeneric": false },
+    { "name": "B♭ Clarinet 2", "startPage": 10, "isGeneric": false },
+    { "name": "Oboe", "startPage": 11, "isGeneric": false }
+  ],
+  "totalSystems": 83,
+  "measuresPerSystem": [
+    5, 5, 7, 7, 6, 5, 6, 7, 7, 7, 8, 6, 9, 5, 5, 7, 5,
+    4, 5, 5, 6, 6, 7, 4, 7, 4, 17, 6, 4, 6, 6, 4, 5, 6, 5,
+    4, 5, 6, 6, 5, 4, 5, 4, 9, 6, 5, 5, 8, 8, 7, 5, 4, 7, 4,
+    9, 9, 10, 8, 12, 14, 15, 13, 9, 8,
+    4, 5, 6, 6, 5, 4, 5, 5, 8, 7, 5, 6, 8, 8, 6, 5, 6, 5, 3
+  ],
+  "tempoMarks": [
+    { "bpm": 127, "atSystem": 0 },
+    { "bpm": 105, "atSystem": 16 },
+    { "bpm": 95, "atSystem": 16 },
+    { "bpm": 120, "atSystem": 16 }
+  ],
+  "timeSignature": "3/4"
+}

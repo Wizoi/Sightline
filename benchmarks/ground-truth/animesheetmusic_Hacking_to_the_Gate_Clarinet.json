@@ -1,0 +1,30 @@
+{
+  "file": "animesheetmusic/Hacking_to_the_Gate_Clarinet.pdf",
+  "pageCount": 1,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 9,
+  "measuresPerSystem": [
+    14,
+    5,
+    6,
+    6,
+    6,
+    5,
+    6,
+    6,
+    6
+  ],
+  "tempoMarks": [
+    {
+      "bpm": 161,
+      "atSystem": 0
+    }
+  ],
+  "timeSignature": "4/4"
+}

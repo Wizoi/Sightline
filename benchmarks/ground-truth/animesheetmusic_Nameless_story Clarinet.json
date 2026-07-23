@@ -1,0 +1,36 @@
+{
+  "file": "animesheetmusic/Nameless_story Clarinet.pdf",
+  "pageCount": 2,
+  "sections": [
+    {
+      "name": "Score",
+      "startPage": 1,
+      "isGeneric": true
+    }
+  ],
+  "totalSystems": 15,
+  "measuresPerSystem": [
+    4,
+    4,
+    4,
+    5,
+    5,
+    5,
+    6,
+    5,
+    7,
+    5,
+    5,
+    4,
+    5,
+    6,
+    4
+  ],
+  "tempoMarks": [
+    {
+      "bpm": 195,
+      "atSystem": 0
+    }
+  ],
+  "timeSignature": "4/4"
+}

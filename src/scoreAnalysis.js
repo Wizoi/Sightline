@@ -277,7 +277,39 @@ async function fillMissingSectionNames(boundaries, systemBands, rotationOverride
   }
 }
 
+// Dev/benchmark-only override: forces every page's measure-number reading
+// down the OCR path (ocrPageNumbers()) even when a real PDF text layer is
+// present, so OCR's measure-reading accuracy can be measured against the
+// same trusted ground truth normally only available for scanned files (which
+// have no equally-precise ground truth of their own -- see
+// scripts/benchmark/run-ocr-validation.mjs). Read fresh from the page's own
+// URL every call, not cached at module load, since the benchmark navigates a
+// fresh page per file. This is NOT a real user-facing feature: nothing in
+// the UI reads or sets this, there's no toggle, and no ordinary user would
+// ever add ?forceOcr=1 to the app's URL by hand -- it only exists to be
+// driven by scripts/benchmark/run-ocr-validation.mjs.
+//
+// Scoped narrowly to the measure-number-reading decision only (see the
+// `usedOcr` line below) -- it does NOT touch section-title matching
+// (findSectionTitle/collectKnownNames), which reads `pageItems` directly and
+// unconditionally regardless of usedOcr. It DOES, as a side effect of the
+// existing branch structure, also suppress `extractTempoMarks()` for any
+// page it forces onto the OCR path -- that call lives in the same `else`
+// (non-OCR) branch as `extractMeasureNumbers()`, not a separate unconditional
+// call, so a forced-OCR page loses its printed tempo marks too even though
+// there's no OCR-based tempo reading to replace them with. Harmless for a
+// REAL usedOcr=true page (image-only, so there was never any tempo text to
+// extract anyway) but real for a forced page that does have one -- this is
+// exactly why the OCR validation script scores measures-per-system/system
+// count only, never BPM (or section names, unaffected either way but still
+// not a full 4-dimension comparison).
+function isForceOcrRequested() {
+  if (typeof location === 'undefined') return false;
+  return new URLSearchParams(location.search).get('forceOcr') === '1';
+}
+
 export async function analyzeScore() {
+  const forceOcr = isForceOcrRequested();
   const systemBands = [];
   const measuresPerSystem = [];
   let boundaries = [];
@@ -407,7 +439,7 @@ export async function analyzeScore() {
       // detected systems but no numeric text item, read the printed measure
       // numbers off the rendered image instead (targeted OCR below) — only on
       // such pages, so normal notation-software PDFs pay nothing.
-      const usedOcr = !pageItems.some((it) => /^\d+$/.test(it.str.trim())) && systemsOnThisPage.length > 0;
+      const usedOcr = (forceOcr || !pageItems.some((it) => /^\d+$/.test(it.str.trim()))) && systemsOnThisPage.length > 0;
       if (!pageItems.length && !usedOcr) continue;
 
       // Convert this page's systems from downsampled-canvas pixel space
