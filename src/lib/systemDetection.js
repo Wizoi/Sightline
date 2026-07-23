@@ -25,11 +25,32 @@ export function pageSystems(lineRows) {
 // noise at the source. A real gap between two distinct staff lines is
 // essentially never this small (if it were, the lines wouldn't be
 // separately resolvable in the image at all), so this is safe.
+//
+// The per-step `maxGap` check alone is NOT enough on a densely-packed page,
+// though — found on a real 20+-instrument conductor's score ("The Fantastic
+// Parade"), where fitting 23 staves into the shared ah=1200 analysis canvas
+// shrinks real line-to-line spacing down to ~2-3px, the SAME magnitude as
+// the anti-aliasing-duplicate-row gap this function was written to collapse.
+// A chain of small per-step gaps (each individually <= maxGap, since a
+// doubled-row line's own internal gap and the gap to the NEXT real line's
+// first doubled row can both read as 1-2px at this scale) then greedily
+// single-linkage-merges an entire 5-line staff into ONE point instead of 5 --
+// confirmed directly against real dumped row/ink data: two real staves
+// (Tenor Saxophone, Baritone Saxophone) that visibly render full 5-line
+// staves collapsed to a single representative row, silently discarding 4 of
+// their 5 lines and, downstream, corrupting that system's whole-page
+// grouping. Capping the group's TOTAL span from its first row (not just each
+// step) at the same maxGap threshold fixes this: a genuine thickness-
+// duplicate group is documented above as spanning only 1-2px total (2-3
+// adjacent rows), well inside this cap, so the original bug's fix is
+// unaffected; a real next staff line 2-3px away now correctly starts a new
+// group once the running span would exceed that small, physically-plausible
+// single-line-thickness bound, instead of chaining indefinitely.
 function collapseThickness(rows, maxGap = 2) {
   const out = [];
   let cur = [rows[0]];
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i] - cur[cur.length - 1] <= maxGap) cur.push(rows[i]);
+    if (rows[i] - cur[cur.length - 1] <= maxGap && rows[i] - cur[0] <= maxGap) cur.push(rows[i]);
     else { out.push(mean(cur)); cur = [rows[i]]; }
   }
   out.push(mean(cur));

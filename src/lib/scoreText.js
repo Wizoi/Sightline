@@ -424,7 +424,47 @@ export function filterMeasureNumberOutliers(entries) {
 // reset (the system where the LOWER number was printed -- i.e. the new
 // part's own first system), each usable directly as a boundary systemIndex
 // for buildSections.
-export function detectMeasureNumberResets(entries, { maxRestart = 3 } = {}) {
+// A section a reset introduces spans from that reset's own systemIndex up to
+// the next accepted reset (or the document's end, at `systemCount`). A real
+// system always holds at least one real measure, so a genuine section's own
+// printed numbers should climb to a value at least roughly comparable to how
+// many systems the section spans -- an entire section 40, 140, even 380
+// systems long whose own readings never climb past single digits (or a lone
+// outlier) isn't real measure-numbering at all, no matter how "confidently"
+// each individual drop-then-climb looked in isolation. Found on a real
+// duets collection ("Lazarus 3 Grand Artistic Duets") with especially poor,
+// near-random OCR: every one of its 9 candidate resets individually passed
+// the drop/climb checks above, yet the sections they introduced spanned
+// 9-143 systems while their own readings never climbed past single digits
+// (one lone outlier reaching 41) -- ratios of (max reading found) / (span)
+// of 0.07-0.29, starkly below the >=1 a real multi-system section should
+// comfortably clear. Contrast a real, already-working sparse case
+// ("KingCotton.pdf"): only 5 and 2 readings in its two sections, but their
+// own max values (173, 173) against their spans (104, 61) give ratios of
+// 1.66 and 2.84 -- genuinely plausible, not just "a small number of samples
+// that happen to look fine." minSamples guards the OTHER direction: a
+// section with too FEW readings to compute this ratio meaningfully (found
+// on real, already-working sparse files -- "Fat Burger," 1 reading in its
+// one reset-introduced section) is left alone entirely rather than
+// second-guessed on scant evidence -- this check only ever REJECTS a
+// candidate reset when there's enough corroborating data to be confident
+// it's implausible, never when data is merely sparse.
+const MIN_RATIO = 0.5;
+const MIN_SAMPLES_FOR_RATIO_CHECK = 3;
+
+function plausibleSectionSpan(resetIndex, allResetIndices, systemCount, entries) {
+  if (systemCount == null) return true; // no span to check against -- caller didn't opt in
+  const laterBounds = allResetIndices.filter((r) => r > resetIndex);
+  const segEnd = laterBounds.length ? Math.min(...laterBounds) : systemCount;
+  const span = segEnd - resetIndex;
+  if (span <= 0) return true; // shouldn't happen, but never reject on a degenerate span
+  const segReadings = entries.filter((e) => e.systemIndex >= resetIndex && e.systemIndex < segEnd);
+  if (segReadings.length < MIN_SAMPLES_FOR_RATIO_CHECK) return true; // not enough evidence either way -- don't second-guess a sparse real section
+  const max = Math.max(...segReadings.map((e) => e.measureNumber));
+  return max / span >= MIN_RATIO;
+}
+
+export function detectMeasureNumberResets(entries, { maxRestart = 3, systemCount } = {}) {
   if (entries.length < 2) return [];
   const sorted = [...entries].sort((a, b) => a.systemIndex - b.systemIndex);
   const resets = [];
@@ -435,5 +475,5 @@ export function detectMeasureNumberResets(entries, { maxRestart = 3 } = {}) {
     if (next && next.measureNumber <= cur.measureNumber) continue; // doesn't resume climbing -- likely a misread, not a real restart
     resets.push(cur.systemIndex);
   }
-  return resets;
+  return resets.filter((r) => plausibleSectionSpan(r, resets, systemCount, sorted));
 }

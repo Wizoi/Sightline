@@ -127,6 +127,35 @@ describe('pageSystems', () => {
     const rows = [149, 150, 155, 156, 161, 162, 167, 168, 173, 174];
     expect(pageSystems(rows)).toEqual([161.5]);
   });
+
+  it('does NOT chain-collapse a whole 5-line staff into one point when real line spacing is as small as the anti-aliasing-duplicate gap (real corpus bug, Fantastic Parade.pdf)', () => {
+    // Real dumped ink rows from page 1 of a real 20+-instrument conductor's
+    // score ("Full band arrangements/Fantastic Parade.pdf"), Tenor Saxophone
+    // and Baritone Saxophone staves (both visibly full 5-line staves in the
+    // rendered page -- confirmed by rendering the actual crop, not assumed).
+    // Fitting 23 staves into the shared ah=1200 analysis canvas shrinks real
+    // line-to-line spacing down to ~2-3px -- the SAME magnitude as the
+    // anti-aliasing-duplicate-row gap collapseThickness() collapses. Each
+    // physical line here ALSO doubled into 2 adjacent rows (gap 1), and the
+    // gap from one line's second duplicate row to the next line's first
+    // duplicate row is only 2 -- individually within the old maxGap=2 check,
+    // so the OLD per-step-only collapseThickness chain-merged the entire
+    // 10-row staff into a single point (mean ~464.5 / ~606.5), discarding 4
+    // of each staff's 5 real lines and, on the real file, cascading into a
+    // wrong page-wide system grouping. Capping the group's total span (not
+    // just each step) at the same threshold fixes it: each staff must
+    // collapse to exactly 5 points (one per real line), and two staves this
+    // far apart (gap ~130, comfortably a real system-vs-system distance on
+    // this densely-packed page) must NOT be merged into one system.
+    const rows = [
+      458, 459, 461, 462, 464, 465, 467, 468, 470, 471, // Tenor Saxophone
+      600, 601, 603, 604, 606, 607, 609, 610, 612, 613, // Baritone Saxophone
+    ];
+    const systems = pageSystemsDetailed(rows);
+    expect(systems).toHaveLength(2);
+    expect(systems.map((s) => Math.round(s.rowMin))).toEqual([459, 601]);
+    expect(systems.map((s) => Math.round(s.rowMax))).toEqual([471, 613]);
+  });
 });
 
 describe('pageSystemsDetailed', () => {

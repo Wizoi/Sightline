@@ -624,4 +624,76 @@ describe('detectMeasureNumberResets', () => {
     expect(detectMeasureNumberResets([])).toEqual([]);
     expect(detectMeasureNumberResets([{ systemIndex: 0, measureNumber: 5 }])).toEqual([]);
   });
+
+  describe('plausible-section-span guard (systemCount option)', () => {
+    // Real dumped `primaryEntries` from a real, especially poor-OCR duets
+    // collection ("Lazarus 3 Grand Artistic Duets" -- see docs/PERSONAS.md
+    // persona 3) -- every one of these 9 candidate resets individually
+    // passes the drop/climb checks above (that's why the OLD behavior,
+    // exercised by calling without `systemCount`, still finds all 9), but
+    // the sections they'd introduce span 9-143 systems while their own
+    // readings never climb past single digits (one lone outlier reaching
+    // 41) -- utterly implausible for real measure numbering. Passing the
+    // real systemCount (457) activates the new corroboration guard.
+    const lazarusEntries = [
+      { systemIndex: 4, measureNumber: 0 }, { systemIndex: 11, measureNumber: 0 },
+      { systemIndex: 22, measureNumber: 4 }, { systemIndex: 29, measureNumber: 3 },
+      { systemIndex: 50, measureNumber: 0 }, { systemIndex: 61, measureNumber: 3 },
+      { systemIndex: 76, measureNumber: 6 }, { systemIndex: 93, measureNumber: 0 },
+      { systemIndex: 104, measureNumber: 3 }, { systemIndex: 110, measureNumber: 0 },
+      { systemIndex: 117, measureNumber: 7 }, { systemIndex: 133, measureNumber: 3 },
+      { systemIndex: 153, measureNumber: 0 }, { systemIndex: 169, measureNumber: 4 },
+      { systemIndex: 180, measureNumber: 0 }, { systemIndex: 186, measureNumber: 3 },
+      { systemIndex: 205, measureNumber: 0 }, { systemIndex: 212, measureNumber: 0 },
+      { systemIndex: 218, measureNumber: 4 }, { systemIndex: 227, measureNumber: 0 },
+      { systemIndex: 233, measureNumber: 0 }, { systemIndex: 258, measureNumber: 3 },
+      { systemIndex: 260, measureNumber: 0 }, { systemIndex: 280, measureNumber: 0 },
+      { systemIndex: 286, measureNumber: 0 }, { systemIndex: 287, measureNumber: 41 },
+      { systemIndex: 311, measureNumber: 3 }, { systemIndex: 323, measureNumber: 0 },
+      { systemIndex: 327, measureNumber: 3 }, { systemIndex: 332, measureNumber: 3 },
+      { systemIndex: 368, measureNumber: 5 }, { systemIndex: 389, measureNumber: 3 },
+      { systemIndex: 395, measureNumber: 0 }, { systemIndex: 398, measureNumber: 4 },
+      { systemIndex: 416, measureNumber: 4 }, { systemIndex: 437, measureNumber: 4 },
+      { systemIndex: 444, measureNumber: 3 }, { systemIndex: 449, measureNumber: 5 },
+      { systemIndex: 453, measureNumber: 0 },
+    ];
+
+    it('without systemCount, keeps the old (over-splitting) behavior unchanged', () => {
+      expect(detectMeasureNumberResets(lazarusEntries)).toEqual([50, 93, 110, 153, 180, 323, 395, 444, 453]);
+    });
+
+    it('with the real systemCount, rejects the implausible resets and keeps only the ones with too little data to judge either way', () => {
+      // 4 of the 9 survive -- each introduces a section with fewer than 3
+      // corroborating readings (93->110 has 2, 153->180 has 2, 444->453 has
+      // 2, 453->457 has 1), so there isn't enough evidence to second-guess
+      // them; the other 5 (spanning 43-143 systems each, on 3-13 readings
+      // that never climb past single digits) are confidently rejected.
+      expect(detectMeasureNumberResets(lazarusEntries, { systemCount: 457 })).toEqual([93, 153, 444, 453]);
+    });
+
+    it('does not regress a real, already-working SPARSE case (KingCotton.pdf) -- few readings, but a genuinely plausible max/span ratio', () => {
+      // Real dumped entries: only 5 and 2 readings in its two real sections,
+      // but their own max values (173, 173) against their spans (104, 61)
+      // give ratios of 1.66 and 2.84 -- clearly plausible, unlike Lazarus's
+      // 0.07-0.29 above. Must keep both real resets, systemCount supplied or not.
+      const kingCottonEntries = [
+        { systemIndex: 37, measureNumber: 2 }, { systemIndex: 59, measureNumber: 1 },
+        { systemIndex: 97, measureNumber: 173 }, { systemIndex: 136, measureNumber: 4 },
+        { systemIndex: 139, measureNumber: 4 }, { systemIndex: 155, measureNumber: 4 },
+        { systemIndex: 163, measureNumber: 0 }, { systemIndex: 193, measureNumber: 173 },
+      ];
+      expect(detectMeasureNumberResets(kingCottonEntries, { systemCount: 224 })).toEqual([59, 163]);
+    });
+
+    it('does not regress a real, already-working case with only ONE corroborating reading (Fat Burger parts with drums)', () => {
+      // Real dumped entries -- the one reset-introduced section has only a
+      // single reading (below MIN_SAMPLES_FOR_RATIO_CHECK), so it must be
+      // left alone rather than rejected on statistically meaningless evidence.
+      const fatBurgerEntries = [
+        { systemIndex: 0, measureNumber: 2 }, { systemIndex: 50, measureNumber: 4 },
+        { systemIndex: 100, measureNumber: 6 }, { systemIndex: 224, measureNumber: 3 },
+      ];
+      expect(detectMeasureNumberResets(fatBurgerEntries, { systemCount: 261 })).toEqual([224]);
+    });
+  });
 });

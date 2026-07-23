@@ -214,14 +214,69 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
 // every instrument once per system); a PDF that's just individual scanned
 // parts with no combined score first won't have that bootstrap signal, so
 // title-matching alone can't split it into named sections. It still gets
-// split into GENERICALLY-named sections, though, via the other, title-
-// independent boundary signal: a printed measure number resetting (see
-// detectMeasureNumberResets in lib/scoreText.js) — this was found to matter
-// for more than naming: without it, a later part's own correctly-read
-// measure numbers looked like "outliers" relative to an earlier part's
-// bigger numbers in one whole-document refinement pass, corrupting that
-// part's measure counts back to the raw (often wildly wrong) barline
-// estimate. See lib/scoreAssembly.js's refineMeasuresPerSection.
+// split into sections, though, via the other, title-independent boundary
+// signal: a printed measure number resetting (see detectMeasureNumberResets
+// in lib/scoreText.js) — this was found to matter for more than naming:
+// without it, a later part's own correctly-read measure numbers looked like
+// "outliers" relative to an earlier part's bigger numbers in one whole-
+// document refinement pass, corrupting that part's measure counts back to
+// the raw (often wildly wrong) barline estimate. See lib/scoreAssembly.js's
+// refineMeasuresPerSection. Such a reset-only boundary starts out nameless
+// (buildSections() would fall back to generic "Section N"); fillMissingSectionNames()
+// below gives it a real name where possible by treating THAT boundary's own
+// first page as a one-off mini-bootstrap page (the same collectKnownNames
+// left-margin/letter-run logic as the page-1 bootstrap, just scoped to a
+// single page instead of relying on "a combined score lists everyone").
+//
+// Cheap by design: re-fetches page.getTextContent() (no pixel rendering, no
+// canvas) for only the handful of pages that actually have a nameless
+// boundary landing on them -- typically a small number of pages even on a
+// many-part booklet. `rotationOverrides` is the same map probePageRotation()
+// built during the main pass, so a page whose declared /Rotate was wrong
+// still gets its text read in the correctly-resolved orientation. Quietly
+// does nothing when that page has no extractable text at all (a scanned/
+// image-only part, same as why the page-1 bootstrap only works on pages
+// with a real text layer) -- the boundary just keeps its generic name,
+// exactly as before this function existed.
+async function fillMissingSectionNames(boundaries, systemBands, rotationOverrides) {
+  for (const b of boundaries) {
+    if (b.name) continue; // already named via title-match
+    const sys = systemBands[b.systemIndex];
+    if (!sys) continue;
+    const pageIdx = sys.page;
+
+    // Use the BOUNDARY's own system as the reference band, NOT necessarily
+    // "this page's topmost system" -- found to matter on a real scanned
+    // booklet ("Teutonia.pdf"): a short part can end and the next part begin
+    // partway down the SAME physical page, so the new part's own label sits
+    // beside ITS system, not the page's first one. collectKnownNames's
+    // isFull logic (label at/up-to-pad-above the referenced band = a real
+    // full name; further above = title-block text) works exactly the same
+    // either way, so using the boundary's own system is both simpler and
+    // correct for the (more common) case where it IS also the page's first.
+
+    let page, content;
+    try {
+      page = await state.pdfDoc.getPage(pageIdx + 1);
+      content = await page.getTextContent();
+    } catch (e) { continue; }
+    const pageItems = content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
+    if (!pageItems.length) continue; // image-only page -- nothing to read here
+
+    const declaredRotation = ((page.rotate % 360) + 360) % 360;
+    const rotation = rotationOverrides[pageIdx] ?? declaredRotation;
+    const pdfHeight = page.getViewport({ scale: 1, rotation }).height;
+    const firstSystemForText = {
+      yTop: pdfHeight * (1 - sys.fracMin),
+      yBottom: pdfHeight * (1 - sys.fracMax),
+    };
+    const pageRows = groupIntoRows(pageItems);
+    const names = collectKnownNames(pageRows, firstSystemForText);
+    const full = names.find((n) => n.isFull);
+    if (full) b.name = full.text;
+  }
+}
+
 export async function analyzeScore() {
   const systemBands = [];
   const measuresPerSystem = [];
@@ -441,6 +496,11 @@ export async function analyzeScore() {
   // is independent of the measure-COUNT refinement's own source choice below.
   const primaryEntries = pickPrimaryEntries([measureNumberEntries, ocrEntriesBox, ocrEntriesStrip]);
   boundaries = addMeasureNumberResetBoundaries(boundaries, primaryEntries, systemBands.length);
+
+  // A nameless (reset-only) boundary still has no instrument name at this
+  // point -- try to find one on THAT boundary's own first page (see
+  // fillMissingSectionNames()'s own doc comment above analyzeScore()).
+  await fillMissingSectionNames(boundaries, systemBands, rotationOverrides);
 
   // Collapse the printed ♩=N marks into one tempo per system, carried
   // forward from each mark until the next one overrides it -- null when no

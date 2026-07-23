@@ -42,7 +42,7 @@ export function pickPrimaryEntries(sources) {
 // reason about/test it as a pure step.
 export function addMeasureNumberResetBoundaries(boundaries, primaryEntries, systemCount) {
   const out = [...boundaries];
-  for (const systemIndex of detectMeasureNumberResets(primaryEntries)) {
+  for (const systemIndex of detectMeasureNumberResets(primaryEntries, { systemCount })) {
     if (systemIndex > 0 && systemIndex < systemCount && !out.some((b) => b.systemIndex === systemIndex)) {
       out.push({ systemIndex, name: null, tempoMarking: null });
     }

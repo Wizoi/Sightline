@@ -564,7 +564,11 @@ rendered results, not just synthetic fixtures) — both in the section-splitting
     heuristic on top of fundamentally noise-dominated input will reliably separate "real reset"
     from "misread" in every case. Consistent with this project's established "surfaced for review,
     not silently wrong" pattern — the sections list is visible and user-editable, so an over-split
-    result is at worst a visible annoyance, not silent corruption.
+    result is at worst a visible annoyance, not silent corruption. **Revisited and substantially
+    improved (2026-07-22) — see the "Lazarus duets over-split" write-up further below**: a genuine
+    additional guard (a section's own printed numbers must climb to a value plausible for its own
+    system span, not just individually pass the drop/climb checks above) cut this file from 10
+    sections to 5, without touching any of the 10→8/17→10/5→2 cases this paragraph already fixed.
   - **Verified against the full 39-file real corpus** (not just the target folders) before and
     after each incremental fix, confirming: every genuinely single-part file still shows no
     sections; every previously-working named-section file (JugglingClowns, the whole Potential-
@@ -611,12 +615,15 @@ rendered results, not just synthetic fixtures) — both in the section-splitting
   enough to activate, if picked back up.
 - ~~A PDF that's *only* individual parts with no combined full score first has no bootstrap page to
   collect known instrument names from, so its parts won't be auto-split into sections~~ --
-  **partially addressed (2026-07-21):** it now still splits, via the title-independent printed-
-  measure-number-reset signal (`detectMeasureNumberResets`) instead of instrument names, just with
-  generic `Section N` names rather than real ones. Real instrument names for this case would still
-  need a different bootstrap source than page 1 (e.g. each part's own title page, read
-  independently) — not attempted, since the generic-name fallback already fixes the more serious
-  half of this gap (measure counts no longer bleeding across an undetected part boundary).
+  **fully addressed (2026-07-21 partial, 2026-07-22 completed — see the "three-item backlog" write-up
+  below for the real-corpus evidence).** It now splits via the title-independent printed-measure-
+  number-reset signal either way, AND a nameless reset boundary gets a real label where one exists —
+  `fillMissingSectionNames()` (`scoreAnalysis.js`) treats THAT boundary's own first page as a one-off
+  mini-bootstrap page (the exact same `collectKnownNames` left-margin/letter-run logic as the page-1
+  bootstrap, just scoped to one page), re-fetching only `page.getTextContent()` for the handful of
+  pages that actually need it — no new pixel rendering. Still correctly does nothing on a page with no
+  extractable text at all (a genuinely scanned/image-only part) — that residual gap is a photographed-
+  page limitation, not a logic gap, exactly as expected.
 
 **Four more findings closed via a follow-up backlog pass (2026-07-22), covering the same 39-file
 real corpus plus four new committed regression tests — verified with real before/after evidence
@@ -649,11 +656,14 @@ per finding, not just an aggregate "all fixed":**
   thin one), producing local group sizes of 2 instead of 3 on more than one group at once, which
   the existing "tolerate at most one" rule correctly (by its own already-verified design) refuses
   to paper over — this is the same "a dropped staff's damage isn't contained to its own system"
-  category already documented above, not evidence of a second bug, and is left as an open staff-
+  category already documented above, not evidence of a second bug, and was left as an open staff-
   detection-density gap rather than loosened further (loosening the *grouping* tolerance to paper
   over a *detection* gap risks silently re-accepting genuinely inconsistent pages, which this
   project's conservative-by-design philosophy explicitly rejects — see the existing "falls back to
-  per-staff" rationale a few paragraphs above). **Verified with a real git-stash-style before/after
+  per-staff" rationale a few paragraphs above). **Root-caused and fixed (2026-07-22) — see the
+  "Fantastic Parade staff-detection density gap" write-up further below**: the actual detection gap
+  turned out to be a real, narrowly-scoped `collapseThickness` bug (not a case needing the grouping
+  tolerance loosened at all). **Verified with a real git-stash-style before/after
   A/B across 14 real files** (temporarily reverting just this one line, re-running the identical
   Playwright-driven batch, restoring it): the 4 affected "Full band arrangements" files all gained
   real, plausible additional systems (Teutonia 63→80, MonogramMarch 141→158, KingCotton 193→208,
@@ -769,6 +779,156 @@ per finding, not just an aggregate "all fixed":**
     pass this file doesn't exercise), it uses an explicit, clearly-commented SYNTHETIC
     `systemsForText`-shaped array positioned to match where the fixture's own text was drawn —
     honest about the one seam this approach doesn't reach, not a silent gap.
+
+**A three-item backlog pass (2026-07-22), closing out the three remaining open questions from the
+sections above — all verified against the real corpus with the same Playwright-driven, real-file,
+before/after discipline as everything else in this section (Playwright-core installed ad hoc for
+this session only, never saved to `package.json`; a small `.scratch/` driver directory used and
+fully deleted afterward — no `public/*.pdf` copies, no committed binaries):**
+
+- **Finding: the "Fantastic Parade" staff-detection-density gap was root-caused, not left open.**
+  The prior write-up (Finding 1, above) correctly diagnosed the *symptom* (two real staves losing
+  most of their detected lines on a dense page) but had stopped short of finding the actual
+  mechanism, reasonably worried that a fix might just be re-loosening the grouping tolerance the
+  Teutonia fix had just tightened. Dumping the real per-row ink data for the affected page (a
+  temporary debug hook added to `pageSystemsDetailed`/`scoreAnalysis.js` for this session, fully
+  reverted afterward) and rendering the actual crop at 4x found the true cause: **this file's page
+  packs 23 real staves into the shared `ah=1200` analysis canvas, shrinking real line-to-line
+  spacing down to ~2-3px — the SAME magnitude as the anti-aliasing-duplicate-row gap
+  `collapseThickness()` was written to collapse.** Two real staves (Tenor Saxophone, Baritone
+  Saxophone), each rendering every one of its 5 lines as a doubled ink row (a 1-2px internal gap),
+  produced a chain of small per-step gaps that individually all cleared the old `maxGap=2` check —
+  `collapseThickness`'s greedy single-linkage merge then chained the ENTIRE 5-line staff into one
+  point instead of 5, discarding 4 of 5 real lines per staff. **Fixed** by additionally capping the
+  group's TOTAL span from its first row at the same `maxGap` threshold (a genuine thickness-
+  duplicate group is already documented as spanning only 1-2px total — comfortably inside the cap —
+  so the original anti-aliasing fix is completely unaffected; a real next line 2-3px away now
+  correctly starts a new group once the running span would exceed that small, physically-plausible
+  single-line-thickness bound, instead of chaining indefinitely). **Verified with real before/after
+  evidence**: on the affected page, both staves now correctly detect all 5 lines; document-wide, the
+  file's real (UI-mutation-corrected — see below) system count went from 417 (corrupted by the
+  detection gap fragmenting one real system into up to 6 fake ones) to 480 (its true structure: one
+  giant 20+-instrument system per page, laid out as 2 stacked staff panels — winds, then brass —
+  plus 3 percussion staves, confirmed by actually rendering and reading the page image, not
+  assumed). The residual imperfection — its percussion staves (one is a genuine single-line
+  percussion staff, a real, different notation convention this pipeline was never designed to
+  detect as a 5-line staff at all) still don't merge into the big system, correctly falling back to
+  one-system-per-staff there — is a *different*, deliberately-conservative case, not a bug: forcing
+  it to merge would need staff-type-awareness this app doesn't have, and risks exactly the "silently
+  accept a genuinely inconsistent page" regression the conservative design exists to prevent.
+  **Methodological note that surfaced along the way and is worth generalizing**: the "systemCount"
+  a caller reads off `state.autoScroll.systemBands.length` is NOT the true whole-document count once
+  a PDF has more than one section — `autoScrollUI.js`'s `renderSummary()` auto-selects section 0
+  whenever `sections.length > 1`, which SWAPS `systemBands` down to just that section's own slice
+  (see `scoreSections.js`'s doc comment on why sections are reference-swaps, not copies). Any future
+  ad hoc verification script (or future debugging session) reading that field directly will silently
+  under-count on a multi-section file; the correct whole-document count is the sum across
+  `state.autoScroll.sections[i].systemBands.length`, or the `systemCount` `analyzeScore()` itself
+  returns before the UI ever touches state.
+- **New regression test** in `systemDetection.test.js` encodes the real dumped row shape from this
+  exact page (two real 5-line staves, each doubled-row, spaced ~130 apart) and asserts both resolve
+  to 5-line staves in 2 separate systems, not 1 collapsed point each merged into one.
+
+- **Finding: the Lazarus-duets over-split was revisited with fresh real data (not re-stated from the
+  prior conclusion) and a genuine, additional, safe guard was found.** Re-ran the real file end to
+  end: it currently produces 10 sections from 9 detected resets, exactly as previously documented.
+  Dumping the real `primaryEntries` feeding `detectMeasureNumberResets` (39 raw OCR strip-scan
+  readings, values oscillating 0/3/4/5/6/7/41 with almost no relationship to position) confirmed
+  every prior conclusion was correct as far as it went — but computing the actual data's coherence
+  (longest strictly-increasing-subsequence length as a fraction of total entries, the exact
+  algorithm `filterMeasureNumberOutliers` already uses elsewhere in this file) surfaced a clean,
+  well-motivated additional signal that a naive whole-document version of doesn't work: a real
+  multi-section document's WHOLE-document LIS fraction is confounded by simply having multiple
+  legitimate resets (a real, clean 4-section IMSLP trio file, "The Spanish Winds Trio," scores only
+  0.26 whole-document despite being perfectly clean *within* each of its sections) — so the fix
+  applies the check PER CANDIDATE SECTION instead: **a section's own printed readings must climb to
+  a value at least roughly proportional to how many systems it spans** (a real system, by
+  definition, holds at least one real measure, so an entire 40-140-system section whose own readings
+  never climb past single digits is implausible on its face) — `max(readings) / span >= 0.5`.
+  Verified this ratio cleanly separates the real vs. fake populations on real data: Lazarus's 9
+  candidate sections score 0.00-0.29 (data-confirmed noise); a real, already-working SPARSE case
+  ("KingCotton.pdf," only 2 and 5 real readings in its two genuine sections) scores 1.66 and 2.84 —
+  clearly on the other side of the line despite the small sample size. **The small-sample side is
+  the real hazard this guard had to avoid**: a segment with too few readings to compute the ratio
+  meaningfully (a real, already-working case, "Fat Burger parts with drums," has only ONE reading in
+  its one reset-introduced section) is explicitly left alone rather than second-guessed — the guard
+  only ever REJECTS a candidate when there's enough corroborating data to be confident it's
+  implausible (`MIN_SAMPLES_FOR_RATIO_CHECK = 3`), never when data is merely sparse. **Fixed** in
+  `detectMeasureNumberResets` (`scoreText.js`, threaded through from `addMeasureNumberResetBoundaries`
+  in `scoreAssembly.js`), verified end-to-end against the real file: **10 sections → 5** (4 of 9
+  candidate resets survive — each introduces a section with fewer than 3 corroborating readings, so
+  there isn't enough evidence to judge them either way), while KingCotton/Fat Burger/Teutonia/
+  MonogramMarch/Spanish-Winds-Trio/A-Lazy-Summer-Day were all confirmed byte-for-byte unchanged.
+  **An unplanned bonus, discovered only by testing, not anticipated going in**: this exact same guard
+  also fixes a brand-new spurious section this backlog's OWN Fantastic-Parade fix (above) had
+  introduced — fixing the staff-detection gap corrected that file's system indices enough that a
+  previously-inert noisy reading now qualified as a "confident" reset at systemIndex 95, splitting a
+  file that should have exactly one section into two. That segment's own numbers (n=306, real
+  readings, max=87 against a span of 385) score 0.226 — well below the same 0.5 threshold — so one
+  general, real-evidence-based fix resolved both problems, rather than needing a second, file-
+  specific patch. Two new committed unit tests in `scoreText.test.js` encode the real Lazarus/
+  KingCotton/Fat-Burger data shapes directly.
+- **General lesson, worth generalizing beyond this one fix**: when a new detection/threshold fix
+  changes upstream data (here: system indices), always re-check downstream consumers of that data
+  on the SAME real file, not just the file(s) the new fix directly targeted — a fix can be correct
+  in isolation and still expose (or even newly trigger) a latent bug one step removed, and the only
+  way to catch that is running the real pipeline end-to-end again, not reasoning about each fix in
+  isolation.
+
+- **Finding: real instrument names (and other genuinely-printed structural labels) for no-
+  bootstrap-page files — implemented as scoped, per boundary-page bootstrapping.** Every detected
+  section boundary that still has no name after title-matching (the reset-only case above) now gets
+  one more chance: `fillMissingSectionNames()` (`scoreAnalysis.js`) treats THAT boundary's own first
+  page as a one-off mini-bootstrap page, reusing `collectKnownNames`'s exact left-margin/letter-run/
+  `isFull` logic (no new heuristic), scoped to a single page instead of relying on "a combined score
+  lists everyone." Runs as a second, targeted pass after boundaries are finalized (not folded into
+  the main per-page loop, since a reset-only boundary's existence isn't known until
+  `detectMeasureNumberResets` runs on the FULL document's entries, after the loop) — cheap by
+  design: only re-fetches `page.getTextContent()` (no pixel rendering, no canvas) for the handful of
+  pages that actually have a nameless boundary landing on them.
+  - **A real refinement, found only by testing against the real target file, not assumed in
+    advance**: the natural first design used "this page's own topmost system" as the reference band
+    for `collectKnownNames`'s `isFull` check (reasoning "a new part starts at the top of its own
+    fresh page, so these are the same system anyway"). Wrong on a real file (`Teutonia.pdf`): a
+    short part can end and the next part begin PARTWAY DOWN THE SAME PHYSICAL PAGE, so the new
+    part's own label sits beside ITS OWN system, not the page's first one — using the page's
+    topmost system looked in completely the wrong vertical band and found nothing. **Fixed** by
+    using the boundary's own system directly as the reference band instead — simpler than the
+    original design AND correct for the (still more common) case where it's also the page's first.
+  - **Verified against the real "Full band arrangements" folder** (the folder this feature targets):
+    of its 4 files with a real detected part boundary, only `Teutonia.pdf` has an actual PDF text
+    layer on the relevant page (`KingCotton`/`Fat Burger` are genuinely scanned images there — this
+    correctly does nothing rather than fabricate a name, exactly as designed). On Teutonia, "Section
+    2" became **"TRIO"** — confirmed by rendering the real page: not an instrument name after all,
+    but a real, legitimately-printed formal-structure marker ("TRIO," at the left margin, right
+    before the system where the piece's Trio strain begins and measure numbering restarts) on what
+    turned out to be a single-instrument Flute part, not a multi-instrument booklet. This is a
+    genuine, verified win using the exact mechanism the backlog asked for — it just revealed that
+    "no bootstrap page" files in this real corpus split on more than one kind of real boundary
+    (instrument changes AND intra-part structural markers), and the same left-margin/letter-run
+    logic correctly picks up either, which is a fair, arguably more useful generalization of the
+    original "instrument name" framing.
+  - **Verified no regression on already-correctly-named files**: `JugglingClowns`, `The Spanish
+    Winds Trio`, and the rest of the already-working IMSLP trio folder were confirmed byte-for-byte
+    unchanged (every one of their boundaries already has a name from title-matching, so
+    `fillMissingSectionNames` never even reaches them — `if (b.name) continue`).
+  - **Fully scanned files (Lazarus, and the other 2 of 4 "Full band arrangements" files with a
+    reset boundary) correctly stay generically named** — there is no general-purpose text-reading
+    OCR in this pipeline (only the existing, narrowly-scoped NUMBER-reading OCR), so a page with no
+    embedded text genuinely has nothing for this feature to read. This is an honest limitation, not
+    a bug: building general OCR text-recognition for instrument labels would be materially new,
+    much larger scope, not attempted here.
+
+- **General lesson tying all three findings together, worth carrying into future OMR work**: every
+  one of these three "revisit an open question" items turned out to have a real, safe, well-
+  evidenced fix once actually investigated with real data — none of them were the "no safe fix
+  exists" outcome the original brief flagged as an acceptable possibility. The common thread across
+  all three (and consistent with every fix earlier in this section) is that the ACTUAL blocking
+  detail was one level more specific than the prior write-up's diagnosis (a chain-merge span cap,
+  not a grouping-tolerance loosening; a per-segment plausibility ratio, not a whole-document
+  coherence score; the boundary's own system, not the page's topmost one) — reinforcing this
+  project's standing discipline: dump the real data and look at the real rendered page before
+  concluding a problem is unfixable, don't stop at the first plausible-sounding root cause.
 
 ---
 
