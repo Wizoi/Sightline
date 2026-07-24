@@ -4,8 +4,12 @@ An independent critical review of Sightline's assumptions, methods, and practice
 Fable model (via a `general-purpose` agent primed with the full contents of
 [docs/PERSONAS.md](../PERSONAS.md) plus a fresh read of the actual source). Scope: fresh scrutiny,
 explicitly invited to disagree with existing verdicts where it had a technical basis to. Findings
-below are as generated; not yet triaged or actioned. See each persona's section in PERSONAS.md for
-the prior context this review was reacting to.
+below are preserved exactly as generated, as the historical record of what was flagged and why —
+**as of 2026-07-23, every finding here has been triaged and actioned**; see
+[`docs/PERSONAS.md`](../PERSONAS.md) persona 9's "Cross-cutting triage" section for the current
+status and disposition of each one (done/declined/deferred), and each owning persona's own section
+for the actual fix write-up. See each persona's section in PERSONAS.md for the prior context this
+review was reacting to.
 
 ---
 

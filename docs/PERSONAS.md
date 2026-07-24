@@ -2104,6 +2104,41 @@ hold-debounce, leaky-integrator drift correction, eased snapping.
   the silent-freeze middle ground reads as broken even when every individual line of code is
   behaving exactly as written.**
 
+**(D1, 2026-07-23) Replaced the fixed-alpha EMA gaze smoothing with a One Euro filter** (Casiez,
+Roussel & Vogel — CHI 2012), per the 2026-07-19 Fable review's finding #5: a fixed-alpha EMA has to
+pick one point on the jitter-vs-lag trade-off for every gaze speed; a speed-adaptive cutoff instead
+smooths heavily while gaze holds still (killing reading-line jitter) and opens the cutoff up as
+gaze speed rises (killing lag on the saccade to the next system) — exactly the trade-off the single
+"smoothness" slider previously forced users to pick a side of. Implemented as a small, dependency-free
+pure function (`lib/oneEuroFilter.js`'s `oneEuroStep(state, rawValue, dt, minCutoff, beta)`, no new
+npm package, matching this codebase's existing practice of hand-rolling small algorithmic utilities),
+with per-axis derivative-estimate memory (`dX`/`dY`) threaded through `decide()`'s explicit `state`
+object the same way `smoothX`/`smoothY` already were — added to `createFollowState()` and every one
+of `decide()`'s return sites (including the `winkIntent` branch's own return sites, which never
+touch gaze smoothing at all and simply pass `dX`/`dY` through unchanged, same as they already did
+for `smoothX`/`smoothY`).
+- **Parameter mapping — kept the single existing "Eye-tracking smoothing" slider** (`cfg.smoothWin`,
+  range 3-40) rather than exposing the filter's own `minCutoff`/`beta` parameters directly, to avoid
+  trading one low-cognitive-load control for three raw ones. `minCutoffFromSmoothWin()` treats
+  `smoothWin` as the same "N-frame time constant" the old EMA's `alpha = 1/smoothWin` always meant,
+  converting it to Hz assuming a representative ~30fps webcam frame rate (`tau = smoothWin/30`,
+  `minCutoff = 1/(2π·tau)`) — chosen specifically so an already-saved slider value (real users may
+  have this in `localStorage`) lands on comparably-smooth *resting* behavior rather than a jarring
+  discontinuity, even though the actual moment-to-moment behavior necessarily differs (that's the
+  whole point of the change). `beta` (how fast the cutoff opens up as speed rises) is a fixed
+  constant (`ONE_EURO_BETA = 0.0008`), empirically picked as the largest value that still keeps
+  synthetic small (~3px) reading-line jitter's steady-state variance *below* the old EMA's, while
+  still cutting a synthetic saccade-sized jump's settle time from the old EMA's ~26 frames to ~5.
+- **Verified via synthetic-sequence tests, not real-corpus data** (this is an interaction-feel
+  property, not something the accuracy benchmark scores, and there was no reported user complaint
+  driving this — backlog item D1 was explicitly "do when touching `followLogic.js` next, not as a
+  standalone session"): `lib/oneEuroFilter.test.js` demonstrates the filter's core claimed property
+  directly against the old fixed-alpha EMA on identical synthetic input (lower steady-state variance
+  on jitter, faster settle time on a saccade-sized step); `followLogic.test.js` adds integration
+  tests confirming `decide()` itself threads the new `dX`/`dY` state correctly frame to frame and
+  that a real gaze jump through `decide()` tracks noticeably further in one frame than the old EMA
+  would have.
+
 **Open questions / future research:**
 - Whether snap-mode's fixed `dt*6` easing rate should itself be user-tunable (currently baked in)
   — no reported user complaints yet, so untouched.
@@ -2367,7 +2402,13 @@ feature idea here than to redesign it after building a server-dependent prototyp
 - Whether a **lightweight in-browser ML model** (WASM/TF.js-class, not a full cloud OMR pipeline)
   could someday narrow the gap on true rhythm extraction without breaking the client-side
   constraint — this is the condition under which the OMR Specialist's "infeasible" verdict (see
-  persona 3) would be worth revisiting.
+  persona 3) would be worth revisiting. **Sharpened to a specific, checkable trigger (2026-07-23),
+  not just "a lightweight model turns up":** revisit if ONNX-exported OMR models (the `oemer`-class
+  reference point already researched in persona 3's literature pass — see "Literature/prior-art
+  research pass," staff/system-detection bullet) become small/fast enough to run acceptably under
+  `onnxruntime-web`/WebGPU. As of that same research pass, `onnxruntime-web`'s own non-SIMD/
+  non-threaded WASM runtime alone is ~10.5MB — comparable to this app's entire existing MediaPipe
+  download — before even counting a real OMR model's own weights, so the condition is not yet met.
 
 ---
 
@@ -2584,6 +2625,11 @@ this list is kept below as the historical record of what was triaged and why, no
 — check each persona's section for current status rather than assuming anything below is still
 outstanding.
 
+**Progress (2026-07-23): all of "do eventually" also shipped** — F2, B2, A2, A3, A4, B4, D1, E2,
+E3, and B3. Every entry below that heading is now struck through; nothing from this triage remains
+open except what's explicitly listed under "skip / decline for now" (deliberately not planned) and
+"low-priority future consideration" (blocked or intentionally deferred, not forgotten).
+
 *Do soon (small, high-leverage, or fixes a documented-but-false safety property):*
 - **D3** — auto-scroll's `systemBands` go stale after any resize/zoom with no invalidation; silent
   wrong-position playback is the feature's worst failure mode. Cheap fix (set `analyzed = false` +
@@ -2613,16 +2659,54 @@ outstanding.
   from the review that argues with an existing persona verdict's *reasoning*, not just its scope.
 
 *Do eventually (real value, but sized for a dedicated session or dependent on something above):*
-- **F4** — small MuseScore-generated fixture corpus (4-6 PDFs) through the real render→detect
-  pipeline in CI. High leverage for detection-work velocity, but scope it honestly: as designed
-  it catches OMR/staff/measure regressions (the class that already bit `collapseThickness`, the
-  pad=20 fix, minFrac), not D3/A1-class interaction bugs. If built, add one Playwright scenario
-  that resizes/collapses the panel after Analyze and asserts the schedule invalidates or
-  re-resolves correctly — that's the part that actually generalizes D3's lesson into a regression
-  net; the static fixtures alone would not have caught D3.
-- **F2** — declarative settings registry. Not urgent today, but it's explicitly the mechanism the
+- **F2** — ~~declarative settings registry. Not urgent today, but it's explicitly the mechanism the
   review says will produce the *next* E1/reading-band-class bug as more modes accumulate. Do this
-  before adding another top-level mode/tab, not before.
+  before adding another top-level mode/tab, not before.~~ **Done (2026-07-23)**:
+  `src/settings.js` now has a single `registry` array (entries shaped `{ key, kind:
+  'slider'|'toggle'|'value', get(), set(v), presence, wire() }`) replacing the four hand-synced
+  places settings used to live in (`bind()`, `currentToggles()`/`applyToggles()`, each control's own
+  `onclick`):
+  - `key` is the exact pre-refactor persisted-JSON property name, kept identical on purpose — see
+    the backward-compat note below.
+  - `get()`/`set(v)` are the single place a setting's cfg/state field and its dependent DOM (button
+    text/class, formatted readout, a `setCameraZoom()` call, etc.) are synced — the thing that used
+    to be hand-duplicated between `applyToggles()` and each control's own click handler.
+  - `presence` (`'always'|'boolean'|'string'|'finite'|'finiteOrNull'`) reproduces each field's
+    original forward-compat guard exactly, so a save from before a field existed (pose/auto/
+    tracking/winkStrength/bpm were all added after the toggles object's original shape) still leaves
+    that field alone instead of clobbering it with a default — verified field-by-field against the
+    pre-refactor code, this was the part most likely to introduce silent drift if gotten wrong.
+  - `wire()` is only used by controls the user directly interacts with, and layers interactive-only
+    side effects (calibration invalidation, a toast, `resetWinkTrackingState()`) on top of the shared
+    `set()` — preserving the pre-refactor asymmetry where a live pose/tracking-type change
+    invalidates calibration but a quiet restore (load/preset/reset) does not.
+  `collectRaw`/`currentToggles`/`applyRaw`/`applyToggles`/preset save+load/every `.onclick` now all
+  iterate this one array; `applyToggles()`'s hand-written per-field branches are gone, exactly as the
+  review asked. One deliberate, disclosed behavior change came with the consolidation: "Load
+  defaults" now resets every registered entry (toggles/tracking-type/wink/tempo included) instead of
+  only the eight sliders it covered before — the alternative (special-casing "reset stops at the
+  slider boundary") would have re-introduced exactly the kind of scattered exception this refactor
+  exists to remove.
+  **Backward compatibility with existing `localStorage` data was verified, not assumed:** the
+  persisted shape (`{ s: {...sliders}, t: {...everything else} }` under `eyepagescroller.settings`,
+  identical shape under `eyepagescroller.presets`) is byte-identical to what the pre-refactor code
+  produced — same keys, same nesting — so real users' already-saved settings/presets need no
+  migration. Confirmed live against a running dev server (a Playwright driver, ~76 checks, 0
+  failures, 0 console errors) covering every slider/toggle/wink-threshold/tracking-type/bpm field
+  updating its DOM on change, save-then-reload restoring every field, preset save/change/load
+  restoring the preset's own values (not intervening edits), "Load defaults" resetting everything,
+  and three constructed old-format `localStorage` blobs loaded directly: the genuinely-ancient flat
+  pre-`{s,t}`-split format, a full pre-refactor `{s,t}` blob at non-default values, and a `{s,t}`
+  blob missing fields added after the object's original shape — confirming each field's specific
+  presence-guard, including that `winkClosedThreshold`/`winkGapThreshold` still force-reset to
+  `null` unconditionally when absent, exactly like the pre-refactor code. This file has, and still
+  has, no automated test coverage of its own (fully DOM/localStorage-coupled UI wiring), so this
+  manual pass is the actual verification, not a supplement to one. Re-verified again after merging
+  onto the current tree (this worktree was pinned at a stale ancestor commit missing the `winkIntent`
+  channel and the `zm`-slider's `repositionAutoScroll` wiring added since — both were manually
+  reconciled in during the merge and re-smoke-tested: drift-toggle persistence, defaults reset,
+  preset round-trip, and wink-tracking-type UI hiding all confirmed working together, zero console
+  errors).
 - **B2** — ~~bundle Bravura's SMuFL time-signature glyphs to unblock digit classification. This
   isn't a new idea, it's persona 3's own documented reconsideration condition ("would need real
   engraving-font reference glyphs") being satisfied — low-medium effort, activates a feature that
@@ -2641,13 +2725,29 @@ outstanding.
 - **A4** — ~~switch `irisTracking.js`'s blink gate to the blendshape signal persona 1 already
   concluded is better; low effort, closes a documented contradiction.~~ **Done (2026-07-23)** —
   see persona 1's write-up above.
-- **B4** — extract shared `detectStaffRows` to stop `analyzeScore()` and `systemDetection.js`
-  duplicating tuned thresholds (the exact kind of constant the minFrac episode showed does drift).
-- **B5** — per-system beats-per-line override for the confirmed real mixed-meter case (Alto
-  Clarinet 5/8→7/8→3/4). Real feature work, not a bug fix; needs its own UI design pass.
-- **D1** — One Euro filter for gaze smoothing. Solid argument, low-med effort, but no reported
+- **B4** — ~~extract shared `detectStaffRows` to stop `analyzeScore()` and `systemDetection.js`
+  duplicating tuned thresholds (the exact kind of constant the minFrac episode showed does
+  drift).~~ **Done (2026-07-23)**: new `lib/inkScan.js` exports `detectStaffRows(isInk, aw, ah,
+  opts)` — the exact staff-row ink-scan (isInk test, 0.45-width run-length row scan, 570-brightness
+  threshold) that previously existed character-for-character in both `scoreAnalysis.js`'s
+  `analyzeScore()` and `systemDetection.js`'s `detectSystems()` (Snap mode). Takes an `isInk(row,
+  col)` callback + explicit width/height rather than a raw pixel array, matching the calling
+  convention every other pixel-scanner in this codebase already uses
+  (`timeSigDetection.js`'s `findInkBlobs`, `lib/measureNumberLocate.js`'s `locateInBand`) — both
+  callers already build an `isInk` closure over their own pixel buffer before this scan runs, so the
+  callback costs nothing. Only the shared pixel scan moved; each caller's own render setup and
+  invocation trigger (automatic Snap-mode vs. heavier user-triggered Analyze) stayed untouched, as
+  intended. **Verified as a true no-op**: the full 39-file corpus benchmark (`scripts/benchmark/
+  run.mjs`) was run before and after via `git stash`, and every per-file field plus the aggregate
+  summary matched byte-identical (39/39 scored, 0 errored, both runs) — confirming this is a pure
+  refactor, not a behavior change. Snap mode (`src/systemDetection.js`, which has no automated test
+  coverage) was separately verified by hand against a real corpus file: identical detected-system
+  count and mark positions before/after. New `lib/inkScan.test.js` covers the extracted function
+  with synthetic fixtures. Full suite (323 tests) and lint clean.
+- **D1** — ~~One Euro filter for gaze smoothing. Solid argument, low-med effort, but no reported
   user complaint about the current EMA — do when touching `followLogic.js` next, not as a
-  standalone session.
+  standalone session.~~ **Done (2026-07-23)** — see Real-Time Control Systems persona's write-up
+  above.
 - **E2** — ~~PageUp/PageDown pedal keycodes; low effort, real value for hardware this audience
   actually uses, just not urgent.~~ **Done (2026-07-23)** — see persona 5's write-up above.
 - **E3** — ~~one baseline ARIA pass (toast `aria-live`, tab roles, label associations); cheap, no
@@ -2660,16 +2760,13 @@ outstanding.
   `selectTab()` now also flips `aria-selected` alongside the existing `.active` class toggle, so
   it stays in sync on every tab switch, not just at initial page load. Markup/attributes only — no
   behavior change, verified by the full existing suite passing unmodified.
-- **B3** — sharpen the full-OMR revisit trigger from "a lightweight ML model turns up" to the
+- **B3** — ~~sharpen the full-OMR revisit trigger from "a lightweight ML model turns up" to the
   specific, checkable condition: ONNX-exported OMR models (the `oemer`-class reference point)
   becoming small/fast enough under `onnxruntime-web`/WebGPU. Documentation-only change to the
-  verdict text below.
+  verdict text below.~~ **Done (2026-07-23)** — see Privacy & Client-Side Architecture persona's
+  "Open questions / future research" above.
 
 *Skip / decline for now:*
-- **D4** (viewport-lazy page rendering) — real risk for the sections feature's large-PDF case, but
-  Med-High effort and the review's own suggestion is right: measure actual memory on a real
-  30-page score-plus-parts PDF before committing to an `IntersectionObserver` rewrite. Don't build
-  this speculatively.
 - **C3** (cache `beatTimestamps` per schedule) — real but minor (GC churn only, not correctness);
   low value relative to even its own low effort given everything else queued.
 - **C4** (spectral flux onset detection) — explicitly sequenced behind C2 in the review itself;
@@ -2678,6 +2775,26 @@ outstanding.
   low-impact perf hygiene; fold into a future pass through that file rather than a dedicated task.
 - **D5** (idle-loop DOM writes in `autoScrollController.tick()`) — same category as A5(a)/(b), fold
   in opportunistically.
+
+*Low-priority future consideration (not backlog — no plan to act, revisit only if the trigger condition below actually occurs):*
+- **D4** (viewport-lazy page rendering) — all pages currently render eagerly at full resolution;
+  a 30-page combined "score + parts" PDF (the exact input the Sections feature invites) could reach
+  hundreds of MB to >1GB of canvas backing store, enough to crash a tab on the low-end Chromebooks
+  this app's real audience uses. Nobody has actually measured real memory usage on a real large
+  file yet, and the fix (`IntersectionObserver`-driven render-near-viewport, with `analyzeScore()`
+  needing to render pages transiently instead of reading already-rendered canvases) is Med-High
+  effort — not worth building speculatively. Revisit only if a real crash/memory report ever
+  surfaces on a real large file, and measure actual bytes before committing to the rewrite.
+- **F4** (small MuseScore-generated fixture corpus, 4-6 PDFs, through the real render→detect
+  pipeline in CI) — high leverage for detection-work velocity (catches OMR/staff/measure
+  regressions — the class that already bit `collapseThickness`, the pad=20 fix, minFrac — though
+  not D3/A1-class interaction bugs; if ever built, add one Playwright scenario that resizes/
+  collapses the panel after Analyze and asserts the schedule invalidates or re-resolves correctly,
+  since the static fixtures alone would not have caught D3). **Blocked, not just deprioritized
+  (2026-07-23): generating the fixture PDFs needs the MuseScore CLI, which isn't installed on this
+  dev machine.** Revisit if/when MuseScore is available (either installed here or fixture PDFs are
+  supplied some other way) — not worth pursuing an alternate fixture-generation path speculatively
+  in the meantime.
 
 **Does this review suggest a documented verdict needs real revisiting?** One case, not more: **F1
 (self-host MediaPipe) challenges the Privacy/Architecture persona's stated reasoning**, not just

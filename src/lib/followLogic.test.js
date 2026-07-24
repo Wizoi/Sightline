@@ -222,6 +222,32 @@ describe('decide: winkIntent explicit intent channel', () => {
   });
 });
 
+describe('decide: gaze smoothing (One Euro filter)', () => {
+  // decide() no longer runs a fixed-alpha EMA over rawGaze — see
+  // lib/oneEuroFilter.js and lib/oneEuroFilter.test.js for the filter's own
+  // unit tests. These two tests check the *integration*: that decide()
+  // actually threads the filter's extra per-axis state (dX/dY) correctly
+  // frame to frame through its own `state` object, the same way it already
+  // threads smoothX/smoothY.
+  it('starts a fresh FollowState with the filter derivative memory zeroed', () => {
+    const s = createFollowState();
+    expect(s.dX).toBe(0);
+    expect(s.dY).toBe(0);
+  });
+
+  it('tracks a large fast gaze jump noticeably further in one frame than the old fixed-alpha EMA would have (smoothWin=12 -> old alpha=1/12)', () => {
+    const r1 = decide(createFollowState(), baseInput({ now: 1000, rawGaze: { x: 300, y: 400, t: 990 } }));
+    expect(r1.state.smoothY).toBe(400); // first sample: passed through untouched, like the old EMA
+
+    // A big jump (400 -> 700) over one ~33ms frame — saccade-sized speed.
+    const r2 = decide(r1.state, baseInput({ now: 1033, dt: 1 / 30, rawGaze: { x: 300, y: 700, t: 1030 } }));
+
+    const oldEmaValue = 400 + (1 / cfg.smoothWin) * (700 - 400); // what the old EMA would have produced: 425
+    expect(r2.state.smoothY).toBeGreaterThan(oldEmaValue + 20); // clearly further along than the old fixed-alpha step
+    expect(r2.state.smoothY).toBeLessThan(700); // still a low-pass, not an instant snap
+  });
+});
+
 describe('decide: drift correction', () => {
   it('nudges biasY toward center only when drift is on and reading', () => {
     const input = baseInput({ driftOn: true, biasY: 0, rawGaze: { x: 300, y: 450, t: 990 } });

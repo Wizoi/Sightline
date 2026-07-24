@@ -4,16 +4,61 @@
 // should say. No DOM access happens here — followController.js applies the
 // returned effects and keeps this function easy to unit test.
 
+import { oneEuroStep } from './oneEuroFilter.js';
+
 export function createFollowState() {
   return {
     smoothX: null,
     smoothY: null,
+    // Derivative-estimate memory for the One Euro filter (lib/oneEuroFilter.js)
+    // — threaded alongside smoothX/smoothY the same explicit way, one per axis
+    // so the two filter instances never share state. Only ever read/updated in
+    // the gaze-point smoothing step below; the winkIntent branch (which never
+    // touches smoothX/smoothY either) just passes these through unchanged.
+    dX: 0,
+    dY: 0,
     snapTarget: null,
     curZone: 0,
     zoneSince: 0,
     scrollCarry: 0,
   };
 }
+
+// Maps the single "Eye-tracking smoothing" slider (cfg.smoothWin, range
+// 3-40, see settings.js/index.html) onto the One Euro filter's `minCutoff`
+// (Hz) — the jitter floor: how much smoothing applies while gaze is
+// essentially still. `beta` (how fast the cutoff opens up as speed rises) is
+// deliberately NOT driven by this slider — see ONE_EURO_BETA below — because
+// exposing two raw filter parameters would undo the point of this being one
+// low-cognitive-load control for a band-student user, and beta only affects
+// behavior *during* a fast saccade, which isn't the axis this slider's
+// "snappy, more jitter" <-> "smooth, more lag" labeling describes anyway.
+//
+// The old EMA's alpha was 1/smoothWin, i.e. smoothWin behaved like an
+// N-frame moving-average time constant. To keep existing saved slider
+// positions (real users may have this in localStorage) landing on a
+// comparably-smooth *resting* behavior rather than a jarring jump, this
+// converts that same "N frames" time constant to Hz assuming a representative
+// ~30fps webcam frame rate: tau = smoothWin / 30 seconds, minCutoff = 1 /
+// (2*pi*tau). Actual runtime dt is measured live and unaffected by this
+// assumption — it only calibrates where the slider's existing 3-40 range
+// lands in Hz space. (smoothWin=12, the default, lands at ~0.4Hz; smoothWin=3
+// at ~1.6Hz; smoothWin=40 at ~0.12Hz.)
+const ASSUMED_FPS = 30;
+function minCutoffFromSmoothWin(smoothWin) {
+  const tau = Math.max(1, smoothWin) / ASSUMED_FPS;
+  return 1 / (2 * Math.PI * tau);
+}
+
+// Fixed, pre-tuned speed-adaptiveness constant (Hz per px/s of estimated
+// gaze speed) — empirically chosen (see lib/oneEuroFilter.test.js) as the
+// largest value that still keeps steady-state jitter variance *below* the
+// old fixed-alpha EMA's on synthetic small (~3px) reading-line jitter, while
+// a real saccade (a sustained few-hundred-px/s swing held over many frames,
+// not a single noisy blip) still opens the cutoff up enough to cut the old
+// EMA's ~26-frame settle time down to ~5 frames. Not exposed to users for
+// the same reason minCutoff's derivation above is: one slider, not three.
+const ONE_EURO_BETA = 0.0008;
 
 // Per-direction dead-zone reach in pixels — used by decide()'s own gaze-point
 // path below, and by anything else that needs to know where the on-screen
@@ -76,7 +121,7 @@ export function decide(state, input) {
     now, dt, cfg, rawGaze, winkIntent, driftOn, snapOn, systemCentersDoc,
     scrollY, docMax, viewportW: W, viewportH: H,
   } = input;
-  let { smoothX, smoothY, snapTarget, curZone, zoneSince, scrollCarry } = state;
+  let { smoothX, smoothY, dX, dY, snapTarget, curZone, zoneSince, scrollCarry } = state;
   let biasY = input.biasY;
 
   const freshIntent = winkIntent && (now - winkIntent.t) < 250;
@@ -89,7 +134,7 @@ export function decide(state, input) {
         const step = (snapTarget - scrollY) * Math.min(1, dt * 6);
         const arriving = Math.abs(snapTarget - (scrollY + step)) < 2;
         return {
-          state: { smoothX, smoothY, snapTarget: arriving ? null : snapTarget, curZone, zoneSince, scrollCarry },
+          state: { smoothX, smoothY, dX, dY, snapTarget: arriving ? null : snapTarget, curZone, zoneSince, scrollCarry },
           biasY,
           status: { cls: 's-good', text: 'snapping…' },
           zoneText: 'snap', velText: String(Math.round(dt ? step / dt : 0)),
@@ -111,14 +156,14 @@ export function decide(state, input) {
           nextZone = 0;
         }
         return {
-          state: { smoothX, smoothY, snapTarget: nextTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry },
+          state: { smoothX, smoothY, dX, dY, snapTarget: nextTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry },
           biasY,
           status: { cls: 's-good', text: dir > 0 ? 'advance → snap' : 'back a system' },
           zoneText: label, velText: '0', scroll: null,
         };
       }
       return {
-        state: { smoothX, smoothY, snapTarget, curZone: 0, zoneSince, scrollCarry },
+        state: { smoothX, smoothY, dX, dY, snapTarget, curZone: 0, zoneSince, scrollCarry },
         biasY,
         status: { cls: 's-good', text: 'reading' },
         zoneText: 'read', velText: '0', scroll: null,
@@ -138,7 +183,7 @@ export function decide(state, input) {
     nextCarry -= whole;
 
     return {
-      state: { smoothX, smoothY, snapTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry: nextCarry },
+      state: { smoothX, smoothY, dX, dY, snapTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry: nextCarry },
       biasY,
       status: { cls: 's-good', text: engaged ? 'following' : 'hold…' },
       zoneText: label, velText: String(Math.round(v)),
@@ -149,7 +194,7 @@ export function decide(state, input) {
   const fresh = rawGaze && (now - rawGaze.t) < 250;
   if (!fresh) {
     return {
-      state: { smoothX, smoothY, snapTarget, curZone: 0, zoneSince, scrollCarry },
+      state: { smoothX, smoothY, dX, dY, snapTarget, curZone: 0, zoneSince, scrollCarry },
       biasY,
       status: { cls: 's-bad', text: 'no gaze — hold' },
       zoneText: '–', velText: '0', scroll: null,
@@ -159,16 +204,23 @@ export function decide(state, input) {
   const onScreenY = rawGaze.y > 0 && rawGaze.y < H;
   if (!onSheetX || !onScreenY) {
     return {
-      state: { smoothX, smoothY, snapTarget, curZone: 0, zoneSince, scrollCarry },
+      state: { smoothX, smoothY, dX, dY, snapTarget, curZone: 0, zoneSince, scrollCarry },
       biasY,
       status: { cls: 's-warn', text: 'looking away — hold' },
       zoneText: 'off', velText: '0', scroll: null,
     };
   }
 
-  const alpha = 1 / Math.max(1, cfg.smoothWin);
-  smoothX = (smoothX == null) ? rawGaze.x : smoothX + alpha * (rawGaze.x - smoothX);
-  smoothY = (smoothY == null) ? rawGaze.y : smoothY + alpha * (rawGaze.y - smoothY);
+  // One Euro filter (lib/oneEuroFilter.js) in place of a fixed-alpha EMA:
+  // speed-adaptive cutoff gives low jitter while reading a line and low lag
+  // on the saccade to the next system, rather than one fixed trade-off point
+  // for every gaze speed. See minCutoffFromSmoothWin/ONE_EURO_BETA above for
+  // the slider-to-filter-parameter mapping.
+  const minCutoff = minCutoffFromSmoothWin(cfg.smoothWin);
+  const xStep = oneEuroStep(smoothX == null ? null : { value: smoothX, deriv: dX }, rawGaze.x, dt, minCutoff, ONE_EURO_BETA);
+  const yStep = oneEuroStep(smoothY == null ? null : { value: smoothY, deriv: dY }, rawGaze.y, dt, minCutoff, ONE_EURO_BETA);
+  smoothX = xStep.value; dX = xStep.deriv;
+  smoothY = yStep.value; dY = yStep.deriv;
 
   const { center, deadUp, deadDown } = deadZoneBounds(cfg, H);
   const offset = smoothY - center;
@@ -190,7 +242,7 @@ export function decide(state, input) {
       const step = (snapTarget - scrollY) * Math.min(1, dt * 6);
       const arriving = Math.abs(snapTarget - (scrollY + step)) < 2;
       return {
-        state: { smoothX, smoothY, snapTarget: arriving ? null : snapTarget, curZone, zoneSince, scrollCarry },
+        state: { smoothX, smoothY, dX, dY, snapTarget: arriving ? null : snapTarget, curZone, zoneSince, scrollCarry },
         biasY,
         status: { cls: 's-good', text: 'snapping…' },
         zoneText: 'snap', velText: String(Math.round(dt ? step / dt : 0)),
@@ -207,7 +259,7 @@ export function decide(state, input) {
         if (curZone !== 1) { nextZone = 1; nextSince = now; }
         if (now - nextSince >= cfg.holdMs) { nextTarget = Math.min(docMax, Math.max(0, next - center)); nextZone = 0; }
         return {
-          state: { smoothX, smoothY, snapTarget: nextTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry },
+          state: { smoothX, smoothY, dX, dY, snapTarget: nextTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry },
           biasY,
           status: { cls: 's-good', text: 'advance → snap' },
           zoneText: smoothX > rightStart ? 'line-end' : 'down', velText: '0', scroll: null,
@@ -220,7 +272,7 @@ export function decide(state, input) {
         if (curZone !== -1) { nextZone = -1; nextSince = now; }
         if (now - nextSince >= cfg.holdMs) { nextTarget = Math.max(0, prev - center); nextZone = 0; }
         return {
-          state: { smoothX, smoothY, snapTarget: nextTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry },
+          state: { smoothX, smoothY, dX, dY, snapTarget: nextTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry },
           biasY,
           status: { cls: 's-good', text: 'back a system' },
           zoneText: 'up', velText: '0', scroll: null,
@@ -228,7 +280,7 @@ export function decide(state, input) {
       }
     }
     return {
-      state: { smoothX, smoothY, snapTarget, curZone: 0, zoneSince, scrollCarry },
+      state: { smoothX, smoothY, dX, dY, snapTarget, curZone: 0, zoneSince, scrollCarry },
       biasY,
       status: { cls: 's-good', text: 'reading' },
       zoneText: 'read', velText: '0', scroll: null,
@@ -257,7 +309,7 @@ export function decide(state, input) {
   nextCarry -= whole;
 
   return {
-    state: { smoothX, smoothY, snapTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry: nextCarry },
+    state: { smoothX, smoothY, dX, dY, snapTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry: nextCarry },
     biasY,
     status: { cls: 's-good', text: engaged || zone === 0 ? 'following' : 'hold…' },
     zoneText: label, velText: String(Math.round(v)),

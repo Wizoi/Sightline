@@ -2,6 +2,7 @@ import { state } from './appState.js';
 import { setStatus } from './ui.js';
 import { pageSystemsDetailed } from './lib/systemDetection.js';
 import { estimateMeasureCount } from './lib/barlineDetection.js';
+import { detectStaffRows } from './lib/inkScan.js';
 import {
   groupIntoRows, collectKnownNames, findSectionTitle, findTempoMarking,
   extractMeasureNumbers, extractTempoMarks, filterMeasureNumberOutliers,
@@ -213,13 +214,14 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
 }
 
 // Scans the rendered score for systems (the same staff-line detection Snap
-// mode uses — src/systemDetection.js) and, for each system, estimates its
+// mode uses — src/systemDetection.js, sharing the pixel scan itself via
+// lib/inkScan.js's detectStaffRows()) and, for each system, estimates its
 // measure count via barline detection. This is the "Analyze score" step for
-// auto-scroll: it deliberately duplicates the row-scanning part of
-// src/systemDetection.js's detectSystems() rather than sharing it, since
-// this is a heavier, explicitly user-triggered one-time pass (also scans
-// columns for barlines), not something that should run automatically on
-// every resize/zoom the way Snap mode's detection does.
+// auto-scroll: it's invoked separately from Snap mode's detectSystems() (also
+// scans columns for barlines), since this is a heavier, explicitly
+// user-triggered one-time pass, not something that should run automatically
+// on every resize/zoom the way Snap mode's detection does — only the
+// invocation stays separate, not the underlying staff-row scan.
 //
 // Alongside that pixel scan, this also reads each page's *real* PDF text
 // layer (page.getTextContent() — pdfjs already provides this for free) to
@@ -385,15 +387,7 @@ export async function analyzeScore() {
       return data[i] + data[i + 1] + data[i + 2] < 570;
     };
 
-    const need = 0.45 * aw;                            // a staff line spans most of the width
-    const lineRows = [];
-    for (let r = 0; r < ah; r++) {
-      let best = 0, cur = 0;
-      for (let c = 0; c < aw; c++) {
-        if (isInk(r, c)) { cur++; if (cur > best) best = cur; } else cur = 0;
-      }
-      if (best > need) lineRows.push(r);
-    }
+    const lineRows = detectStaffRows(isInk, aw, ah);
 
     const systemsOnThisPage = []; // {index (global), rowMin, rowMax} in this page's own canvas-pixel space
     let firstSystemPixelInfo = null; // for the high-res time-signature re-render below

@@ -1,6 +1,7 @@
 import { state } from './appState.js';
 import { $, scoreEl, sysMarksEl } from './ui.js';
 import { pageSystems } from './lib/systemDetection.js';
+import { detectStaffRows } from './lib/inkScan.js';
 
 // Find staff systems: scan a downsampled copy of each page for rows of ink,
 // group contiguous dark rows into systems (via lib/systemDetection.js), and
@@ -17,16 +18,11 @@ export function detectSystems() {
     tctx.drawImage(cv, 0, 0, aw, ah);
     let data;
     try { data = tctx.getImageData(0, 0, aw, ah).data; } catch (e) { return; }
-    const need = 0.45 * aw;                            // a staff line spans most of the width
-    const lineRows = [];
-    for (let r = 0; r < ah; r++) {
-      let best = 0, cur = 0; const base = r * aw * 4;
-      for (let c = 0; c < aw; c++) {
-        const i = base + c * 4;
-        if (data[i] + data[i + 1] + data[i + 2] < 570) { cur++; if (cur > best) best = cur; } else cur = 0;
-      }
-      if (best > need) lineRows.push(r);
-    }
+    const isInk = (r, c) => {
+      const i = (r * aw + c) * 4;
+      return data[i] + data[i + 1] + data[i + 2] < 570;
+    };
+    const lineRows = detectStaffRows(isInk, aw, ah);
     pageSystems(lineRows).forEach((rowY) => state.systemCentersDoc.push(docTop + (rowY / ah) * docH));
   });
   state.systemCentersDoc.sort((a, b) => a - b);
