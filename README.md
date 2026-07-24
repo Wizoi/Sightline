@@ -293,6 +293,13 @@ npm run build           # production build → dist/
 npm run preview          # serve the production build locally
 ```
 
+**Accuracy over time:** `npm run benchmark:report` prints a trend table of Analyze-score
+detection accuracy (system count, section names, measures per system, tempo marks) across every
+commit that's been snapshotted, straight from the committed history in `benchmarks/snapshots/` —
+no setup or personal music corpus needed, it works right after cloning. See `scripts/benchmark/`
+for the runner that produces those snapshots (it drives the app against a real, git-ignored
+corpus of PDFs — not something a clone needs in order to just read the trend).
+
 **Layout:**
 
 - `src/lib/` — pure, dependency-free logic (calibration math, gaze math, staff/system
