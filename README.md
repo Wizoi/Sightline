@@ -17,7 +17,10 @@ score so the music you're reading stays in a comfortable band on the screen. Whe
 you reach the end of a line — or glance down at the next one — it turns the page for
 you. No pedals to tap, no hands off the instrument.
 
-> **Tip:** add a short screen-recording or GIF of it in action here — it's the fastest way to show what Sightline does.
+Three ways to turn the page, pick whichever fits how you play:
+- **Wink tracking** (default) — no calibration needed; wink your left eye to scroll up, your right to scroll down.
+- **Iris tracking** — watches exactly where your eyes point for the most precise, natural page-following.
+- **Auto-scroll (tempo-based)** — no camera at all; set your tempo and time signature and the page scrolls itself, like a metronome for sheet music.
 
 ## Contents
 
