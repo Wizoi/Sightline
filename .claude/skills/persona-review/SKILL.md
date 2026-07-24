@@ -1,11 +1,11 @@
 ---
 name: persona-review
-description: Fan a proposed Sightline feature or change out to all 9 domain-expert personas (docs/PERSONAS.md, .claude/agents/) for parallel impact analysis, then synthesize one combined report. Use whenever scoping, designing, or evaluating a new Sightline feature or significant change — every persona must respond, even if only to explicitly decline with "no impact."
+description: Fan a proposed Sightline feature or change out to all 10 domain-expert personas (docs/PERSONAS.md, .claude/agents/) for parallel impact analysis, then synthesize one combined report. Use whenever scoping, designing, or evaluating a new Sightline feature or significant change — every persona must respond, even if only to explicitly decline with "no impact."
 ---
 
 # Persona review
 
-Runs Sightline's 9-persona "development team" (see [docs/PERSONAS.md](../../../docs/PERSONAS.md))
+Runs Sightline's 10-persona "development team" (see [docs/PERSONAS.md](../../../docs/PERSONAS.md))
 against a single feature or change, in parallel, and produces one combined report. The point is
 coverage, not unanimity: a persona with nothing to add should say so explicitly in one line
 rather than being silently skipped — a visible "no impact" is a real, load-bearing signal (it
@@ -22,9 +22,9 @@ review on X" or "get the team's take on X," treat X as the feature/change to ana
 1. **State the feature/change** in one or two sentences — restate it back plainly enough that a
    persona with zero conversation context (they get none) can evaluate it cold. If the ask is
    vague, tighten it into a concrete proposal first (what would actually change, for whom) rather
-   than passing ambiguity downstream to all 9 personas.
+   than passing ambiguity downstream to all 10 personas.
 
-2. **Launch all 9 persona subagents in parallel, in foreground, in a single message** — nine
+2. **Launch all 10 persona subagents in parallel, in foreground, in a single message** — ten
    `Agent` tool calls with `run_in_background: false`, one per `subagent_type` below, all in the
    same response so they run concurrently and you get every result back before continuing:
 
@@ -37,6 +37,7 @@ review on X" or "get the team's take on X," treat X as the feature/change to ana
    - `privacy-architecture-engineer`
    - `qa-test-strategist`
    - `feature-strategy-lead`
+   - `tech-writer`
 
    Give every persona the **same self-contained prompt** (they share no context with each other
    or with this conversation), built from this template:
@@ -56,7 +57,7 @@ review on X" or "get the team's take on X," treat X as the feature/change to ana
    > Be concrete and specific to this feature — generic domain background the reader can already
    > get from PERSONAS.md isn't useful here.
 
-3. **Synthesize one combined report** from the 9 replies — don't just concatenate them. Format:
+3. **Synthesize one combined report** from the 10 replies — don't just concatenate them. Format:
 
    - **Feature reviewed:** the one/two-sentence restatement from step 1.
    - **Per-persona verdicts:** a compact table or list — persona name, verdict (No impact /
@@ -68,7 +69,7 @@ review on X" or "get the team's take on X," treat X as the feature/change to ana
      personas like but Privacy/Architecture rules out), a risk multiple personas independently
      flagged, or a dependency chain (e.g. Feature Strategy Lead's recommended spike blocks on
      something QA flagged). If nothing cross-cuts, say so briefly rather than forcing a finding.
-   - **Recommendation:** one clear next step, informed by the above — not a restatement of all 9
+   - **Recommendation:** one clear next step, informed by the above — not a restatement of all 10
      opinions.
 
 4. **Offer to persist durable findings.** If any persona's analysis produced something worth
@@ -83,6 +84,6 @@ review on X" or "get the team's take on X," treat X as the feature/change to ana
   so themselves in one line. That's cheap, and the discipline is the point: a consistently-empty
   section over many reviews is itself useful signal (e.g. "Audio DSP has had no impact on the
   last 6 features" tells you something about where the app's action actually is).
-- If the feature is large enough that 9 full analyses would be unwieldy, it's fine to ask the
-  user whether they want the full 9-way review or a scoped subset — but default to running all 9
+- If the feature is large enough that 10 full analyses would be unwieldy, it's fine to ask the
+  user whether they want the full 10-way review or a scoped subset — but default to running all 10
   unless told otherwise, since that's the explicit point of this skill.

@@ -72,7 +72,7 @@ only in your browser).
 ## Using Sightline
 
 **Tracking type** (in the **Eye/Wink** tab) picks how Sightline reads your intent to turn the page:
-- **Wink tracking** (default) — no calibration needed. Wink your **left** eye to scroll up, your **right** eye to scroll down; a *blink* (both eyes together) is ignored, only a one-eyed wink counts. **Wink scroll strength** controls how firm a push each wink gives.
+- **Wink tracking** (default) — no calibration needed to get started. Wink your **left** eye to scroll up, your **right** eye to scroll down; a *blink* (both eyes together) is ignored, only a one-eyed wink counts. **Wink scroll strength** controls how firm a push each wink gives. If winks are missed or blinks trigger by mistake, **Calibrate wink sensitivity** measures your own resting and winking eyes for a few seconds and sets personal thresholds instead of the one-size-fits-all default.
 - **Iris tracking** — watches where your eyes point, via the 9-point calibration described above.
 
 Switching tracking types is instant — pick whichever is more reliable for your face/lighting/glasses.
@@ -115,7 +115,11 @@ the panel (the two are alternatives — starting one automatically pauses the ot
    unusually-spaced scores — check the **Measures per system** list it produces and fix any
    count that looks wrong; the schedule uses exactly what's there. If it spots a printed time
    signature it doesn't recognize with confidence, it may offer a **"detected — use this?"**
-   suggestion instead of guessing — accept it or leave your own setting as-is.
+   suggestion instead of guessing — accept it or leave your own setting as-is. If your music
+   prints its own tempo, Analyze also reads it and sets your starting Tempo to match
+   automatically (and flags any later tempo changes it finds) — this happens right away, with
+   no confirmation step, so if a change it shows doesn't match your actual music, it misread the
+   page; just set the Tempo slider back to what you want.
 5. **Pick a section, if there is one** — a combined "Score and Parts" PDF (a full conductor
    score followed by individual instrument parts, all in one file) gets split into named
    sections automatically, shown in a dropdown. Pick your own part and everything below —
@@ -137,16 +141,21 @@ while paused.
 ## Tuning
 
 Every player, webcam, and room is a little different, so a minute with these sliders pays off.
-They're grouped into **the reading band** and **how it scrolls**.
+They're grouped into **the reading band** and **how it scrolls**. A few only make sense for Iris
+tracking (they watch a screen position, which Wink tracking doesn't have) and disappear from the
+panel automatically when Wink tracking is active — that's expected, not a bug. **Eye-tracking
+smoothing** and **Ignore glances past the sides** are tucked under the **Advanced** disclosure at
+the bottom of the Eye/Wink tab rather than sitting loose in the main list.
 
 | Slider | What it does | Turn it… |
 |---|---|---|
 | **Reading zone size** | Height of the band you read in | Up if it turns while you're still on a line; down to advance sooner |
 | **Where you read on screen** | Band position, top ↔ middle | Toward the top for more look-ahead of what's coming |
-| **Turn the page when my eyes reach…** | How far right before it advances | Left to turn earlier; right to require the very end of the line |
+| **Turn the page when my eyes reach…** *(Iris only)* | How far right before it advances | Left to turn earlier; right to require the very end of the line |
 | **Page scroll speed** | How fast it moves | Up for quick page turns, down for slow passages |
-| **Motion smoothness** | Steady vs. responsive | Up if it jitters; down if it lags your eyes |
+| **Eye-tracking smoothing** *(Iris only, Advanced)* | Steady vs. responsive | Up if it jitters; down if it lags your eyes |
 | **Wait before turning** | Delay before a turn commits | Up to ignore more stray glances; down for snappier turns |
+| **Ignore glances past the sides** *(Iris only, Advanced)* | How close to the left/right edge still counts as reading, vs. looking away | Up if a glance toward the edge of the screen accidentally scrolls; down if it ignores real reading near the edges |
 | **Music size** | Zoom of the score (100% = fit width) | Down to see more of the page at once; up to enlarge |
 
 ## Getting the best accuracy
@@ -156,8 +165,8 @@ Webcam eye-tracking isn't laser-precise, but a good setup makes it reliable:
 - **Light your face** evenly (a lamp in front beats a bright window behind you).
 - Put the **camera near eye level** and sit roughly **centered** in its view.
 - Leave **Auto-frame** on — it zooms in on your face automatically so your eyes are well-resolved even if you sit back from the laptop.
-- Use **Check accuracy** (in the **Eye/Wink** tab): it shows you 7 targets and reports how close your gaze lands, whether up/down or sideways is weaker, and your room brightness — with specific fixes. Aim for "you'd land on the right line" being high.
-- If it drifts mid-piece, tap <kbd>R</kbd> to recenter; if your setup changes (new camera, resized window), it'll suggest a quick recalibration.
+- With **Iris tracking**, use **Check accuracy** (in the **Eye/Wink** tab): it shows you 7 targets and reports how close your gaze lands, whether up/down or sideways is weaker, and your room brightness — with specific fixes. Aim for "you'd land on the right line" being high.
+- If it drifts mid-piece, tap <kbd>R</kbd> to recenter; if your setup changes (new camera, resized window), it'll suggest a quick recalibration. (Both are Iris-tracking concepts — Wink tracking has no drift to correct, since it never looks at a screen position.)
 
 ## Troubleshooting
 
@@ -165,16 +174,21 @@ Webcam eye-tracking isn't laser-precise, but a good setup makes it reliable:
 secure context (HTTPS or `localhost`) — the hosted GitHub Pages link and `npm run dev` /
 `npm run preview` both satisfy that automatically.
 
-**It keeps scrolling when I look away.** That's tracking drift. Add light, tap <kbd>R</kbd> to
-recenter, or recalibrate — and use the pedal/spacebar pause when you glance away. Running
-*Check accuracy* will tell you what's off.
+**It keeps scrolling when I look away (Iris tracking).** That's tracking drift. Add light, tap
+<kbd>R</kbd> to recenter, or recalibrate — and use the pedal/spacebar pause when you glance away.
+Running *Check accuracy* will tell you what's off.
 
 **Snap won't advance.** Make sure a PDF is loaded and *Snap* is on; look down at the next
 system and hold briefly. If your score has unusual spacing, turn on *Show detected systems* to
 see whether it grouped the staves correctly.
 
-**It feels inaccurate.** Recalibrate slowly (hold your gaze on each dot), improve lighting, and
-keep *Head-pose comp* on so moving your head doesn't throw it off.
+**It feels inaccurate (Iris tracking).** Recalibrate slowly (hold your gaze on each dot), improve
+lighting, and keep *Head-pose comp* on so moving your head doesn't throw it off.
+
+**Wink tracking misses winks, or a blink triggers a page turn by mistake.** Run **Calibrate wink
+sensitivity** (next to the Wink scroll strength slider) — it measures your own resting eyes and
+each individual wink, and sets thresholds for your face instead of the shared default. Good,
+even lighting on your face helps here too.
 
 **Auto-scroll's measure counts look wrong.** Detection isn't perfect on dense, unusually-spaced,
 or handwritten scores. Open **Measures per system** after analyzing and correct any counts by
@@ -263,7 +277,8 @@ optical detail.
 <summary>Rendering</summary>
 
 Mozilla's PDF.js renders your score into one tall scrollable column that Sightline scrolls
-smoothly (or snaps) based on your gaze.
+smoothly (or snaps to a system) based on whatever is currently driving it — your eyes, a wink, or
+the auto-scroll schedule.
 </details>
 
 ## Requirements
@@ -293,12 +308,27 @@ npm run build           # production build → dist/
 npm run preview          # serve the production build locally
 ```
 
-**Accuracy over time:** `npm run benchmark:report` prints a trend table of Analyze-score
-detection accuracy (system count, section names, measures per system, tempo marks) across every
-commit that's been snapshotted, straight from the committed history in `benchmarks/snapshots/` —
-no setup or personal music corpus needed, it works right after cloning. See `scripts/benchmark/`
-for the runner that produces those snapshots (it drives the app against a real, git-ignored
-corpus of PDFs — not something a clone needs in order to just read the trend).
+**Accuracy over time:** Analyze-score detection is checked against a 39-file real-world corpus
+(band parts, duets, full scores) on every meaningful change, comparing each PDF's actual systems/
+sections/measures/tempo against hand-verified ground truth. Earliest snapshot vs. the latest one
+on record:
+
+| Detected correctly | 2026-07-20 (earliest) | 2026-07-23 (latest) |
+|---|---|---|
+| Systems (lines of music) | 80.6% | 92.9% |
+| Section names (in multi-part PDFs) | 63.8% | 72.5% |
+| Measures per system¹ | 3.1% | 83.8% |
+| Printed tempo marks | 43.6% | 96.8% |
+
+¹ Only counted on files where system detection itself was already correct (a prerequisite for a
+fair per-system comparison) — 20 of 39 files at the earliest snapshot, 28 of 39 at the latest;
+not yet measurable on the rest.
+
+Run `npm run benchmark:report` for the full trend across every snapshotted commit, straight from
+the committed history in `benchmarks/snapshots/` — no setup or personal music corpus needed, it
+works right after cloning. See `scripts/benchmark/` for the runner that produces those snapshots
+(it drives the app against a real, git-ignored corpus of PDFs — not something a clone needs in
+order to just read the trend).
 
 **Layout:**
 
