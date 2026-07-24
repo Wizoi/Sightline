@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-3H1oBUVs.js"></script>
+  <script type="module" crossorigin src="./assets/index-DsO0OD7_.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-DHUYNEsG.css">
 </head>
 <body>
@@ -30,23 +30,23 @@
   <input type="file" id="file" accept="application/pdf" style="display:none" />
   <button id="loadBtn" class="primary">📄 Load PDF…</button>
 
-  <label>Music size (100% = fit page width) <span class="val" id="zmv"></span></label>
+  <label for="zm">Music size (100% = fit page width) <span class="val" id="zmv"></span></label>
   <input type="range" id="zm" min="40" max="140" value="100" />
   <div class="ends"><span>smaller — see more</span><span>bigger</span></div>
 
-  <div class="tabBar">
-    <button id="tabTracking" class="tabBtn">👁 Eye/Wink</button>
-    <button id="tabAutoScroll" class="tabBtn">🎵 Tempo</button>
+  <div class="tabBar" role="tablist">
+    <button id="tabTracking" class="tabBtn" role="tab" aria-selected="true" aria-controls="trackingPanel">👁 Eye/Wink</button>
+    <button id="tabAutoScroll" class="tabBtn" role="tab" aria-selected="false" aria-controls="autoScrollPanel">🎵 Tempo</button>
   </div>
 
-  <div id="trackingPanel" class="tabPanel">
-    <label>Tracking type</label>
+  <div id="trackingPanel" class="tabPanel" role="tabpanel" aria-labelledby="tabTracking">
+    <label for="trackingType">Tracking type</label>
     <select id="trackingType"></select>
     <button id="camBtn">🎥 Start camera</button>
     <button id="calibBtn" disabled>🎯 Calibrate</button>
     <button id="testBtn" disabled>📏 Check accuracy</button>
     <div id="winkStrengthRow">
-      <label>Wink scroll strength <span class="val" id="wsv"></span></label>
+      <label for="ws">Wink scroll strength <span class="val" id="wsv"></span></label>
       <input type="range" id="ws" min="0" max="100" value="50" />
       <div class="ends"><span>gentle</span><span>strong</span></div>
       <div class="ends" id="winkDebug"><span>left eye: <span class="val" id="wkL">–</span></span><span>right eye: <span class="val" id="wkR">–</span></span></div>
@@ -65,44 +65,44 @@
 
     <div class="group">The reading band</div>
 
-    <label>Reading zone size <span class="val" id="dzv"></span></label>
+    <label for="dz">Reading zone size <span class="val" id="dzv"></span></label>
     <input type="range" id="dz" min="4" max="40" value="18" />
     <div class="ends"><span>small</span><span>large</span></div>
 
-    <label>Where you read on screen <span class="val" id="bpv"></span></label>
+    <label for="bp">Where you read on screen <span class="val" id="bpv"></span></label>
     <input type="range" id="bp" min="12" max="55" value="50" />
     <div class="ends"><span>near top</span><span>middle</span></div>
 
     <div id="rightZoneRow">
-      <label>Turn the page when my eyes reach… <span class="val" id="rtv"></span></label>
+      <label for="rt">Turn the page when my eyes reach… <span class="val" id="rtv"></span></label>
       <input type="range" id="rt" min="40" max="88" value="62" />
       <div class="ends"><span>mid-line</span><span>line end</span></div>
     </div>
 
     <div class="group">How it scrolls</div>
 
-    <label>Page scroll speed <span class="val" id="spv"></span></label>
+    <label for="sp">Page scroll speed <span class="val" id="spv"></span></label>
     <input type="range" id="sp" min="60" max="1000" value="360" />
     <div class="ends"><span>slow</span><span>fast</span></div>
 
-    <label>Wait before turning <span class="val" id="hdv"></span></label>
+    <label for="hd">Wait before turning <span class="val" id="hdv"></span></label>
     <input type="range" id="hd" min="0" max="1200" value="350" />
     <div class="ends"><span>instant</span><span>patient (ignores quick glances)</span></div>
 
     <details>
       <summary>Advanced</summary>
       <div id="smoothnessRow">
-        <label>Eye-tracking smoothing <span class="val" id="smv"></span></label>
+        <label for="sm">Eye-tracking smoothing <span class="val" id="smv"></span></label>
         <input type="range" id="sm" min="3" max="40" value="12" />
         <div class="ends"><span>snappy, more jitter</span><span>smooth, more lag</span></div>
       </div>
       <div id="sheetMarginRow">
-        <label>Ignore glances past the sides <span class="val" id="mgv"></span></label>
+        <label for="mg">Ignore glances past the sides <span class="val" id="mgv"></span></label>
         <input type="range" id="mg" min="0" max="30" value="6" />
         <div class="ends"><span>less</span><span>more</span></div>
       </div>
       <button id="autoFrameToggle" class="on">🔍 Auto-frame face: on</button>
-      <label>Camera zoom (manual — turn Auto-frame off) <span class="val" id="czv"></span></label>
+      <label for="cz">Camera zoom (manual — turn Auto-frame off) <span class="val" id="czv"></span></label>
       <input type="range" id="cz" min="100" max="300" value="100" />
       <div class="ends"><span>1×</span><span>3×</span></div>
       <button id="poseToggle" class="on">🧭 Head-pose comp: on</button>
@@ -112,23 +112,28 @@
     </details>
   </div>
 
-  <div id="autoScrollPanel" class="tabPanel hidden">
-    <div class="sub">Scroll to where you want to start, analyze the score, confirm the tempo, then play — the page advances on its own, in time.</div>
+  <div id="autoScrollPanel" class="tabPanel hidden" role="tabpanel" aria-labelledby="tabAutoScroll">
+    <div class="sub">Analyze the score, confirm the tempo, then play — the page advances on its own from the top, in time.</div>
     <button id="analyzeScoreBtn">🎵 Analyze score</button>
     <div id="autoScrollSummary" class="sub"></div>
+    <div id="autoScrollTempoInfo" class="sub"></div>
+    <div id="measureReadingsBox" class="hidden">
+      <div class="sub">Two readings of the measure numbers disagree — pick the more accurate:</div>
+      <div id="measureReadingsOpts"></div>
+    </div>
     <ul id="autoScrollWarnings"></ul>
 
     <div id="sectionsBox" class="hidden">
-      <label>Sections detected in this PDF — pick one to focus on</label>
+      <label for="sectionsSelect">Sections detected in this PDF — pick one to focus on</label>
       <select id="sectionsSelect"></select>
       <div id="sectionMeta" class="sub"></div>
       <div id="sectionTimeSigSuggestion"></div>
     </div>
 
-    <label>Time signature — beats per measure <span class="val" id="beatsPerMeasureV"></span></label>
+    <label for="beatsPerMeasure">Time signature — beats per measure <span class="val" id="beatsPerMeasureV"></span></label>
     <input type="range" id="beatsPerMeasure" min="1" max="12" value="4" />
 
-    <label>Tempo <span class="val" id="bpmV"></span></label>
+    <label for="bpmInput">Tempo <span class="val" id="bpmV"></span></label>
     <input type="range" id="bpmInput" min="30" max="240" value="100" />
     <div class="ends"><span>slow</span><span>fast</span></div>
 
@@ -141,11 +146,11 @@
       <button id="autoScrollStart" disabled>▶ Start auto-scroll</button>
     </div>
 
-    <label>Playback speed <span class="val" id="tempoPctV"></span></label>
+    <label for="tempoPct">Playback speed <span class="val" id="tempoPctV"></span></label>
     <input type="range" id="tempoPct" min="50" max="150" value="100" />
     <div class="ends"><span>slower</span><span>faster</span></div>
 
-    <button id="liveTempoToggle">🎤 Live tempo correction (experimental)</button>
+    <button id="liveTempoToggle">🎤 Live tempo correction</button>
     <div class="sub">Listens while you play and gently nudges the schedule toward your actual timing. Only active during playback.</div>
     <div id="liveTempoStatus" class="sub"></div>
   </div>
@@ -158,7 +163,7 @@
   <details>
     <summary>Presets (per piece)</summary>
     <div class="row">
-      <input type="text" id="presetName" placeholder="Piece name…" />
+      <input type="text" id="presetName" placeholder="Piece name…" aria-label="Piece name" />
       <button id="presetSave">Save</button>
     </div>
     <div class="row">
@@ -227,9 +232,9 @@
   </div>
 </div>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
-<div id="recal">
+<div id="recal" role="alert">
   <span id="recalMsg">Your setup changed — recalibrate for accuracy.</span>
   <button id="recalNow">Recalibrate</button>
   <button id="recalDismiss">Keep old</button>
