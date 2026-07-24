@@ -113,20 +113,26 @@ the panel (the two are alternatives — starting one automatically pauses the ot
    see [Using Sightline](#using-sightline) for scores with multiple staves per line) and
    estimates how many measures are in each. Detection isn't perfect, especially on dense or
    unusually-spaced scores — check the **Measures per system** list it produces and fix any
-   count that looks wrong; the schedule uses exactly what's there.
-5. **Start auto-scroll** — the page scrolls and highlights the current system in time, starting
+   count that looks wrong; the schedule uses exactly what's there. If it spots a printed time
+   signature it doesn't recognize with confidence, it may offer a **"detected — use this?"**
+   suggestion instead of guessing — accept it or leave your own setting as-is.
+5. **Pick a section, if there is one** — a combined "Score and Parts" PDF (a full conductor
+   score followed by individual instrument parts, all in one file) gets split into named
+   sections automatically, shown in a dropdown. Pick your own part and everything below —
+   measures, tempo, playback — scopes to just that section, so you're not scheduled against
+   the whole document. A plain single-part PDF has just one section and skips this entirely.
+6. **Start auto-scroll** — the page scrolls and highlights the current system in time, starting
    from wherever you're scrolled to. **Pause** stops it in place; **Start** again resumes from
    your current scroll position, so you can nudge things while paused.
-6. **Playback speed** nudges the overall pace up or down (50–150%) without re-entering a new
+7. **Playback speed** nudges the overall pace up or down (50–150%) without re-entering a new
    BPM.
 
-**Live tempo correction** (experimental) is a toggle inside this tab. While auto-scroll is
-playing, it listens through your microphone for note attacks and gently nudges the scroll speed
-to track your actual playing tempo — a small, bounded correction, not full tempo-following. It
-shows a live status: *listening* (mic connected, nothing heard yet), *tracking tempo* (actively
-adjusting), or *no signal* (quiet for a while, e.g. during a rest). It's opt-in, off by default,
-and does nothing while paused — expect it to need a bit of trial and error to feel right for
-your instrument and room.
+**Live tempo correction** is a toggle inside this tab. While auto-scroll is playing, it listens
+through your microphone for note attacks and gently nudges the scroll speed to track your actual
+playing tempo — a small, bounded correction, not full tempo-following. It shows a live status:
+*listening* (mic connected, nothing heard yet), *tracking tempo* (actively adjusting), or *no
+signal* (quiet for a while, e.g. during a rest). It's opt-in, off by default, and does nothing
+while paused.
 
 ## Tuning
 
@@ -214,7 +220,22 @@ Analyzing a score for auto-scroll reuses the same staff-line/system detection as
 scans each system's columns for **barlines** (tall vertical strokes) to estimate its measure
 count. Those counts, together with your time signature and BPM, build a simple schedule — how
 long each system should take — that the scroll position and highlight interpolate through
-smoothly.
+smoothly. If the PDF has no real text layer (a scanned or photographed page), the printed
+measure numbers themselves are read back off the image via on-device OCR instead, as a more
+accurate fallback than the barline estimate alone.
+</details>
+
+<details>
+<summary>Sections: splitting a combined score</summary>
+
+A PDF containing a full conductor score followed by individual instrument parts (a common
+"Score and Parts" export) is automatically split into named sections, using the PDF's own real
+embedded text — instrument names, tempo markings, and printed measure-number resets — rather
+than guessing from pixels. Each section keeps its own measure counts, time signature, and tempo,
+so picking your own part schedules auto-scroll against just that part, not the whole document. A
+section detected only from a measure-number reset (no matching instrument name nearby) is
+labeled as an auto-detected split rather than a real name, so an approximate boundary is never
+presented as more certain than it is.
 </details>
 
 <details>

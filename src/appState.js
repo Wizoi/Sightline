@@ -125,8 +125,8 @@ export const state = {
     playing: false,
     scheduleElapsed: 0,          // accumulated schedule-time seconds elapsed — see autoScrollController.js
 
-    // Live tempo correction ("onset-nudge") — experimental, opt-in mic-driven
-    // trim on top of tempoPct. See src/liveTempo.js and lib/tempoCorrection.js.
+    // Live tempo correction ("onset-nudge") — opt-in mic-driven trim on top
+    // of tempoPct. See src/liveTempo.js and lib/tempoCorrection.js.
     liveTempoEnabled: false,
     liveTempoStatus: 'off',      // 'off' | 'listening' | 'tracking' | 'no signal'
     tempoCorrection: { correction: 1, lastOnsetAt: null },
