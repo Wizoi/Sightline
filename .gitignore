@@ -27,3 +27,8 @@ public/mediapipe/
 # Tesseract.js OCR worker + core WASM + model, fetched by
 # scripts/fetch-ocr-assets.mjs (same reasoning as above) — not checked in.
 public/tesseract/
+
+# Bravura (SIL OFL-licensed SMuFL music-engraving font), fetched by
+# scripts/fetch-bravura-assets.mjs from a pinned upstream release tag (same
+# self-hosting reasoning as above) — not checked in, regenerated locally.
+public/fonts/

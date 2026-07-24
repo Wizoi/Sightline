@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gridSimilarity, matchDigit } from './timeSigMatch.js';
+import { gridSimilarity, matchDigit, pickBestTimeSig } from './timeSigMatch.js';
 
 // Small block-letter-style synthetic grids, not meant to look like real
 // digits -- just distinct enough shapes to test matching logic.
@@ -61,5 +61,24 @@ describe('matchDigit', () => {
 
   it('returns null for an empty template set', () => {
     expect(matchDigit(SHAPE_X, {})).toBeNull();
+  });
+});
+
+describe('pickBestTimeSig', () => {
+  const grid = { beatsPerMeasure: 4, noteValue: 4, confidence: 0.6 };
+  const ocr = { beatsPerMeasure: 3, noteValue: 4, confidence: 0.9 };
+
+  it('picks the higher-confidence candidate', () => {
+    expect(pickBestTimeSig([grid, ocr])).toBe(ocr);
+    expect(pickBestTimeSig([ocr, grid])).toBe(ocr); // order-independent
+  });
+
+  it('ignores null/undefined candidates', () => {
+    expect(pickBestTimeSig([null, grid, undefined])).toBe(grid);
+  });
+
+  it('returns null when every candidate is null', () => {
+    expect(pickBestTimeSig([null, null])).toBeNull();
+    expect(pickBestTimeSig([])).toBeNull();
   });
 });

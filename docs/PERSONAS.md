@@ -1547,6 +1547,62 @@ re-spike of anything already answered above. Verdicts below, organized by file/t
   Not attempted in this pass (out of scope — research only), but concrete enough to hand to a future
   session: reuse `findInkBlobs`/the barline column scan across the *inter-staff* band, not just the
   intra-system one.
+  - **Attempted (2026-07-23) and falsified on the real corpus, across two independent
+    implementations — not adopted.** The idea itself (barline continuity as a corroborating signal
+    for system grouping) is exactly what Audiveris/oemer document, and the building blocks existed
+    cheaply, so this was worth a real spike. Both attempts were fully implemented, unit-tested, and
+    verified against the real 39-file corpus (not just synthetic fixtures) before being rejected —
+    this is a genuine negative result, not an abandoned-early idea.
+    - **Round 1**: a single-page signal — a candidate irregular group (gap-size clustering rejects
+      it for non-uniform size, e.g. "My Happy Life"'s real 2-staff-then-3-staff pattern) is trusted
+      if every internal staff-to-staff gap shows 2+ columns where ink runs the full 0.95-of-band-height
+      bar on both sides AND is solid across the gap between them. **Result: never fired on either
+      real target file.** Direct instrumentation against the real running app showed every genuine
+      irregular page in "My Happy Life" and "Arno Andiam Romanza" produces EXACTLY 1 confirming
+      column per gap, never 2+ — confirmed byte-identical app output before/after on both files.
+      **Worse, on "Fat Burger parts with drums"** (a scanned single-staff-part booklet, unrelated to
+      the target case) **several coincidental, genuinely-unrelated 2-staff pairings showed 4-7
+      confirming columns** — more apparent "evidence" than either real target case ever produced —
+      and fired a false merge, regressing that file's system count from 261 to 251 (true count 391).
+      The confirming-column count runs BACKWARDS from what the design assumed: real bracing produced
+      less local evidence than scan-noise coincidence did. No single per-page threshold value fixes
+      the target files without also flooding Fat-Burger-style false positives.
+    - **Round 2**: since real per-system instrumentation patterns repeat throughout a whole piece
+      while single-page scan-noise coincidences shouldn't, the fix was redesigned around cross-page
+      corroboration — a cheap first pass renders every page once (reusing that same render for the
+      real per-page pipeline, so no added rendering cost), computes a coarse shape signature
+      (staff count + bucketed internal spacing) for each candidate irregular group with at least 1
+      confirming column, and only promotes a group to an actual merge if the SAME signature recurs
+      with evidence on 2+ *distinct* pages of the document. Cleanly implemented (`computeGrouping`,
+      `collectCandidateGroupSignatures`, `groupSignature` in `lib/systemDetection.js`;
+      a `pageCache`-based two-pass pre-pass in `scoreAnalysis.js` that renders each page exactly
+      once), thoroughly tested (18 new test cases including a full end-to-end simulation of the
+      real cross-page tally), 326/326 suite passing, lint clean. **Verified against the real
+      39-file corpus again — still does not help either target file** (still byte-identical output,
+      before and after, on both "My Happy Life" and "Arno Andiam Romanza": their own real irregular
+      shapes apparently never recur in a bucketed-signature-matching way across 2 distinct pages of
+      their own documents either, despite recurring visibly to a human reader). **Fat Burger still
+      regressed the identical way** (261→251) — its scanned pages share very uniform real staff
+      spacing throughout (being one instrument's part, scanned from one physical source), so a
+      coincidental noise "shape" is, if anything, MORE likely to coincidentally recur across 2+ of
+      its pages than a deliberate one is to recur in a piece with more real instrumentation variety.
+      **A third, new regression also appeared**: "HLazarus_3_Grand_Artistic_Duets" went from
+      406→415 systems (true count 326), a file round 1 didn't touch at all.
+    - **Verdict: dropped, not merged.** Two independently-designed, individually well-reasoned,
+      individually well-tested implementations both failed to fire on the real cases they targeted
+      and both introduced real regressions elsewhere in the corpus — the second attempt's
+      regressions were a strict superset of the first's, not an improvement. This is strong enough
+      evidence that a *local, per-page-or-cross-page geometric ink-continuity signal alone* cannot
+      safely discriminate genuine repeated bracing from scan/print noise on this real corpus, at
+      least not via the specific signatures tried (raw column-continuity count; coarse
+      staff-count-plus-spacing shape matching). A future attempt would need either a fundamentally
+      different discriminating signal (not just a stricter threshold on the same one) or to accept a
+      narrower, more conservative scope than "any irregular grouping, anywhere" — e.g. requiring
+      corroboration from a completely independent source (real barline/measure alignment against an
+      already-known-good adjacent system) rather than shape-signature recurrence alone. Not pursued
+      further this session; "My Happy Life" and "Arno Andiam Romanza" remain unfixed for now (still
+      correctly falling back to one-staff-per-system, the safe conservative default — no regression,
+      just no improvement either).
   - **The ML-based route (oemer's/homr's UNet segmentation models) is explicitly not worth
     it, exactly as the task's own framing anticipated.** Confirmed via oemer's own README: model
     checkpoints are large enough that first download is documented as "up to 10 minutes" — this is
@@ -1679,6 +1735,88 @@ re-spike of anything already answered above. Verdicts below, organized by file/t
     handwritten digits, not engraved music-font numerals — so even a minimal model would need its
     own from-scratch training data, not an off-the-shelf MNIST checkpoint, adding real effort on
     top of the runtime-size problem.)
+
+**Time-signature detection follow-through (2026-07-23): both the tesseract-OCR spike and the
+Bravura-template bundling (backlog B2) were implemented and tested against real files from the
+39-file corpus. Neither "wins" outright — the honest result is that Tesseract, once two real bugs
+found along the way were fixed, reads a genuinely clean single-glyph crop far more reliably than
+either grid variant, but is fragile in ways the grid method isn't, so both now run and the higher
+-confidence result wins per detection, not a fixed primary/fallback order.**
+- **Bravura templates (B2) do NOT clearly beat the old plain-sans-serif fallback on real files —
+  a genuinely negative/neutral finding, not the hoped-for confirmation.** Direct A/B (same real
+  glyph, same code path, only the template source toggled) against a Sibelius-engraved file's
+  clearly-legible "5" and "4" digits: sans-serif template confidence 0.28/0.36 vs. Bravura's own
+  0.17/0.23 — both comfortably below the 0.55 threshold (so neither ever surfaced either way), but
+  Bravura was *lower*, not higher, on this real glyph. On a MuseScore-engraved file (Bravura's own
+  closest real-world relative), grid confidence was ALSO low (~0.10-0.20) regardless of template
+  source. **Conclusion: for THIS matching approach (16x20 Jaccard grid overlap), font-accurate
+  templates aren't the bottleneck they were assumed to be** — the coarse grid resolution and the
+  approximate numerator/denominator row-split (see below) appear to matter more than which
+  reference font supplies the digit shapes. B2 is still implemented (self-hosted, OFL-licensed,
+  zero ongoing cost, safely inert if the font fails to load) since it's genuinely free and can't
+  regress anything, but it should not be read as "the fix" for grid accuracy.
+- **Tesseract, once fed a properly-prepared crop, is dramatically more accurate than either grid
+  variant on a real, clean glyph — but getting there required finding and fixing two real problems
+  neither in the original plan.** (1) A raw numerator/denominator crop sits directly ON the staff
+  (unlike a measure number, which sits in the clear margin and was already known to OCR fine) —
+  fed raw, Tesseract read nothing at all (0% confidence, empty string) on a real crop, confirmed
+  reproducibly; blanking any row that's dark across >85% of the crop's width before OCR (a real
+  staff line spans nearly the full width; a digit's own stroke never does) took the SAME real crop
+  from 0% to 94% confidence, correctly reading "5". (2) The existing candidate-blob window
+  (`blobs.slice(1, 4)`, both methods) was too narrow: a real 5-flat key signature produces 4
+  accidental blobs before the real time-signature glyph, so the true digit was never even
+  attempted — widened to `slice(1, 8)` for both methods, confirmed against the same real file (Take
+  Five, correctly detecting 5/4 end-to-end once both fixes were in).
+- **Tesseract's own per-character confidence is NOT reliable enough to compare directly against
+  the grid method on a raw min-of-two-digits basis — found only by testing, not anticipated.** The
+  same real, correctly-read "4" denominator self-reported 0% confidence (reproduced consistently
+  across 4 PSM modes against the actual production self-hosted worker, not a fluke), while spurious
+  reads on non-digit fragments (a clef swirl, a flat sign) self-reported non-trivial 21-70%
+  confidence on their OWN single side. What actually filters out the spurious blobs, confirmed
+  across every test file, is a structural gate — BOTH the numerator and denominator half must
+  independently recognize a digit at all — not a confidence floor: a non-digit fragment reads as a
+  digit on at most one side by chance, never cleanly on both. Once past that gate, the pair's
+  reported confidence is taken as `Math.max` of the two sides (not `Math.min`, the original design)
+  specifically because `Math.min` was found to actively discard the one genuinely correct real
+  match in this testing session, dragged to 0 by its own denominator's confidence quirk.
+- **Final combination: highest-confidence-wins between the two methods (`pickBestTimeSig`,
+  `lib/timeSigMatch.js`), not a fixed primary/fallback order** — justified by the evidence above,
+  not assumed going in: grid confidence never once cleared the 0.55 threshold on any real file
+  tested (whether via Bravura or sans-serif templates), so in every real case tested it was
+  ALREADY structurally impossible for grid to outrank a genuine OCR hit; OCR's own structural gate
+  (both halves must read) already excludes the false-positive risk a naive confidence comparison
+  would otherwise carry. OCR is not unconditionally trusted over grid in the code, though — a
+  future file where grid genuinely does score higher (e.g. OCR's worker fails to load, or a
+  cleaner scan than any tested here) is still free to win on its own merits.
+- **A real, separate bug found (but NOT fixed — out of scope for this task) while sourcing test
+  files, worth a dedicated future session:** `scoreAnalysis.js`'s `firstBarlineCol` heuristic (an
+  85%-of-band-height continuous ink run) can trigger on a clef's own vertical stroke rather than a
+  genuine barline when the staff band is short, producing a degenerate few-pixel-wide "candidate
+  region" that renders as a blank crop — confirmed on 2 of 6 real MuseScore-engraved single-part
+  files tested (`Mixed_Nuts Clarinet.pdf`, `Dance_In_The_Game Trumpet.pdf`), both silently skipping
+  time-signature detection entirely rather than misdetecting anything. This blocked testing the
+  Bravura-template hypothesis against more Bravura-native files than the one (`Peace_Sign
+  Clarinet.pdf`) that happened to have a wide enough region to avoid it.
+- **A real, separate, PRE-EXISTING UI bug found and fixed while verifying: `renderTimeSigSuggestion()`
+  was never called at all for a single-section file** (`autoScrollUI.js`'s `renderSummary()` calls
+  it only via `selectSection()`, which the single-section — i.e. most common, single-band-part —
+  branch never reaches). This silently made the entire "detected — use this?" suggestion feature
+  invisible for this app's most common real case ever since it was introduced, regardless of any
+  grid/OCR/Bravura accuracy question — found only because every real test file in this session
+  happened to be single-section, and the suggestion never appeared even once detection started
+  working correctly underneath. **Fixed** (one added call in the single-section branch).
+- **Verified end-to-end against real files, not just unit-level:** `randomclarinet/takefive.pdf`
+  (Sibelius-engraved, famously 5/4 time, a real 5-flat key signature) now correctly shows "🔍 Time
+  signature: 5/4 detected — use this?" after these fixes, confirmed by eye against the real
+  rendered page. `pinkpanther.pdf` (also Sibelius) and `Peace_Sign Clarinet.pdf` (MuseScore)
+  correctly show NO suggestion — the former appears to use the "𝄴" common-time symbol rather than
+  digits (neither method can read that; a genuinely different, out-of-scope problem), the latter's
+  numerator/denominator glyphs are packed too tightly for either method's row-split to isolate
+  cleanly. Both null results are the CORRECT, safe behavior (never a wrong guess), not a bug.
+  Testing used a temporary, session-only Playwright script (not committed, matching this project's
+  established ad hoc verification pattern — see the Testing/QA persona) driving the real dev
+  server against real files from the local corpus; no PDF or rendered crop was committed or left
+  on disk afterward.
 
 ---
 
@@ -2485,10 +2623,14 @@ outstanding.
 - **F2** — declarative settings registry. Not urgent today, but it's explicitly the mechanism the
   review says will produce the *next* E1/reading-band-class bug as more modes accumulate. Do this
   before adding another top-level mode/tab, not before.
-- **B2** — bundle Bravura's SMuFL time-signature glyphs to unblock digit classification. This
+- **B2** — ~~bundle Bravura's SMuFL time-signature glyphs to unblock digit classification. This
   isn't a new idea, it's persona 3's own documented reconsideration condition ("would need real
   engraving-font reference glyphs") being satisfied — low-medium effort, activates a feature that
-  already ships inert with working plumbing.
+  already ships inert with working plumbing.~~ **Done (2026-07-23)** — see persona 3's write-up
+  above. Implemented and tested against real files alongside a tesseract-OCR spike; the honest
+  result is that Bravura templates alone did NOT clearly improve grid-matcher accuracy over the
+  old sans-serif fallback on real files tested, while OCR (once two unrelated real bugs were fixed)
+  did — both now run, highest confidence wins.
 - **A2** — ~~give `decide()` an explicit intent channel instead of wink synthesizing a fake gaze
   point. A1 is already patched, so this is prevention of a bug *class* recurring, not an active
   fix — worth doing before the next `decide()` geometry change, not urgently now.~~ **Done

@@ -148,6 +148,14 @@ function renderSummary(result) {
     refreshTempoLabel();
     refreshTempoInfo();
     renderMeasuresList();
+    // selectSection() would normally also render the time-signature
+    // suggestion for the active section -- a single-section file (this app's
+    // most common real case, a single band part -- see persona 6) never
+    // reaches selectSection() at all, which silently left this suggestion
+    // dead for that whole common case ever since it was introduced. Found
+    // directly while verifying the OCR/Bravura work above against real
+    // single-section files (2026-07-23) -- see docs/PERSONAS.md persona 3.
+    renderTimeSigSuggestion(state.autoScroll.sections[0]);
   }
 }
 

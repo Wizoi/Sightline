@@ -8,13 +8,14 @@
 // as a "detected — use this?" suggestion the user confirms, never applies
 // silently (see scoreAnalysis.js / autoScrollUI.js).
 //
-// Deliberately pure and grid-shaped: the caller (scoreAnalysis.js) does
+// Deliberately pure and grid-shaped: the caller (timeSigDetection.js) does
 // the DOM/canvas work of extracting a candidate region's pixels and
-// rendering reference digit templates (via ctx.font/fillText — there's no
-// bundled copy of the actual music engraving font, so templates are a
-// plain bold sans-serif rendering of each digit; close enough for coarse
-// shape matching, not exact-font OCR). This module only compares
-// already-extracted, same-size binary grids.
+// rendering reference digit templates. As of 2026-07-23 those templates are
+// the bundled Bravura SMuFL font's own timeSig0-timeSig9 glyphs (a real
+// music-engraving font, self-hosted — see timeSigDetection.js and
+// scripts/fetch-bravura-assets.mjs), falling back to a plain bold
+// sans-serif digit render only if that font fails to load. This module only
+// compares already-extracted, same-size binary grids either way.
 
 // Jaccard-style overlap: intersection over union of "ink" cells. Robust to
 // a candidate being a bit bolder/thinner than the template (unlike a raw
@@ -46,4 +47,24 @@ export function matchDigit(candidate, templates) {
     if (score > bestScore) { bestScore = score; best = digit; }
   }
   return best === null ? null : { digit: best, confidence: bestScore };
+}
+
+// Combines independent best-effort time-signature detections (e.g. this
+// module's own grid-Jaccard shape match and a tesseract OCR pass over the
+// same candidate region — see timeSigDetection.js) into one result:
+// whichever non-null candidate reports the HIGHEST confidence wins outright.
+// Every candidate must already be on the SAME 0-1 confidence scale — this
+// function doesn't know or care what produced a given score, only compares
+// the numbers it's handed (timeSigDetection.js normalizes Tesseract's native
+// 0-100 confidence before calling this). Returns null when every candidate is
+// null/undefined (nothing detected at all), never throws on a mixed
+// null/real array — a caller naturally builds one by mapping "did this
+// method produce anything" over its own list of attempted methods.
+export function pickBestTimeSig(candidates) {
+  let best = null;
+  for (const c of candidates) {
+    if (!c) continue;
+    if (!best || c.confidence > best.confidence) best = c;
+  }
+  return best;
 }

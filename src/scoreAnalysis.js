@@ -126,7 +126,11 @@ async function renderHighResRegion(page, pageWidthPts, pageHeightPts, ah, aw, ro
     const i = (r * width + c) * 4;
     return data[i] + data[i + 1] + data[i + 2] < 570;
   };
-  return { isInk, width, height };
+  // `canvas` itself is returned (not just the derived isInk/pixel data) so
+  // the caller can also feed this exact same crop to the OCR-based
+  // time-signature reading (timeSigDetection.js's detectTimeSignature) --
+  // both methods read the SAME rendered region, just via different means.
+  return { isInk, width, height, canvas };
 }
 
 // Reads the printed measure numbers off an image-only page (no text layer) with
@@ -331,7 +335,8 @@ export async function analyzeScore() {
   const tempoMarkEntries = []; // { systemIndex (global), bpm } from printed ♩=N marks
   const timeSigByIndex = {}; // global system index -> best-effort {beatsPerMeasure, noteValue, confidence}
   let knownNames = [];
-  let usedOcrAnywhere = false; // any page fell back to OCR -> terminate the worker + note it in the summary
+  let usedOcrAnywhere = false; // any page fell back to MEASURE-NUMBER OCR -> note it in the "No embedded text" summary
+  let ocrWorkerTouched = false; // usedOcrAnywhere OR time-sig OCR ran -> terminate the worker either way (see below)
   const rotationOverrides = {}; // rebuilt fresh each run, same as systemBands/measuresPerSystem below
 
   const tmp = document.createElement('canvas');
@@ -492,10 +497,18 @@ export async function analyzeScore() {
       // the only place a "detected — use this?" suggestion attaches.
       if (isSectionStart && firstSystemPixelInfo) {
         const { globalIndex, rowMin, rowMax, firstBarlineCol } = firstSystemPixelInfo;
-        const { isInk: hiResIsInk, width, height } = await renderHighResRegion(
+        const { isInk: hiResIsInk, width, height, canvas: hiResCanvas } = await renderHighResRegion(
           page, pageViewport1x.width, pdfHeight, ah, aw, rowMin, rowMax, firstBarlineCol, rotation,
         );
-        const detected = detectTimeSignature(hiResIsInk, 0, height - 1, 0, width);
+        // This also triggers the same lazy tesseract worker load as the
+        // image-only-PDF measure-number OCR path below (detectTimeSignature
+        // tries both the grid matcher and an OCR read of the same crop) --
+        // tracked separately from usedOcrAnywhere (which drives the "No
+        // embedded text" summary message: a normal text-layer PDF's measure
+        // numbers were NOT read via OCR just because time-sig detection also
+        // used the worker) but still needs the worker freed at the end.
+        ocrWorkerTouched = true;
+        const detected = await detectTimeSignature(hiResCanvas, hiResIsInk, 0, height - 1, 0, width);
         if (detected) timeSigByIndex[globalIndex] = detected;
       }
 
@@ -508,6 +521,7 @@ export async function analyzeScore() {
         // per-part number reset isn't mistaken for a break). Section titles /
         // tempo words / time-sig digits aren't text here, so nothing else to read.
         usedOcrAnywhere = true;
+        ocrWorkerTouched = true;
         setStatus('', `Reading printed measure numbers (page ${pageIdx + 1}/${numPages})…`);
         const { boxEntries, stripEntries } = await ocrPageNumbers(page, pageViewport1x, systemsOnThisPage, systemsForText, ah, rotation);
         ocrEntriesBox.push(...filterMeasureNumberOutliers(boxEntries));
@@ -520,7 +534,7 @@ export async function analyzeScore() {
     } catch (e) { /* no text layer + OCR unavailable/failed — pixel detection above is unaffected */ }
   }
 
-  if (usedOcrAnywhere) await terminateOcr(); // free the OCR worker thread + model
+  if (ocrWorkerTouched) await terminateOcr(); // free the OCR worker thread + model
 
   // Whether any page's resolved rotation differs from its declared one --
   // the caller (autoScrollUI.js) uses this to trigger one renderAll() pass
