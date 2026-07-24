@@ -70,13 +70,22 @@ async function recognizeBox(worker, canvas, box, { padPx = 6, upscale = 3, minCo
   return parseInt(digits, 10);
 }
 
-// boxes: [{ systemIndex, box }]. Returns [{ systemIndex, measureNumber }].
+// boxes: [{ systemIndex, box, boxBelow }]. `box` is the usual above-the-staff
+// candidate (locateMeasureNumber); `boxBelow` (optional) is the mirrored
+// below-the-staff candidate (locateMeasureNumberBelow) for engravings that
+// print the number under the staff instead (a real 2008 scanned combo/jazz
+// chart, "Fat Burger" -- see docs/PERSONAS.md persona 3). Tried in that
+// order and the first one whose OCR passes the confidence gate wins, so a
+// file where `box` already reads correctly is completely unaffected by
+// `boxBelow` even being present -- purely an additional fallback, not a
+// competing candidate. Returns [{ systemIndex, measureNumber }].
 export async function ocrNumbersByBox(canvas, boxes) {
   const worker = await getWorker();
   await worker.setParameters({ tessedit_pageseg_mode: '8' }); // single word = one isolated number
   const out = [];
-  for (const { systemIndex, box } of boxes) {
-    const num = await recognizeBox(worker, canvas, box);
+  for (const { systemIndex, box, boxBelow } of boxes) {
+    let num = box ? await recognizeBox(worker, canvas, box) : null;
+    if (num == null && boxBelow) num = await recognizeBox(worker, canvas, boxBelow);
     if (num != null) out.push({ systemIndex, measureNumber: num });
   }
   return out;

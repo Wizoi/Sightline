@@ -15,17 +15,20 @@ export function createFollowState() {
   };
 }
 
-// Per-direction dead-zone reach in pixels, shared by decide() and anything
-// else that needs to know where the up/down trigger zones actually are (e.g.
-// wink tracking synthesizing a gaze point — see winkTracking.js). Capped per
-// direction so it can never swallow the *entire* travel room above or below
-// the band: a band positioned near the top of the screen (bandPos <=
-// deadZoneFrac — well within the sliders' range) would otherwise make the
-// "up" trigger mathematically unreachable, since offset's minimum possible
-// value is -center. A single source of truth for this cap matters because a
-// second caller re-deriving it from raw cfg values (not the capped result)
-// can silently synthesize a point that never actually clears the real
-// trigger zone — this happened once already with the wink tracker.
+// Per-direction dead-zone reach in pixels — used by decide()'s own gaze-point
+// path below, and by anything else that needs to know where the on-screen
+// up/down trigger zones actually sit (e.g. rendering the reading-band overlay
+// in the DOM). Capped per direction so it can never swallow the *entire*
+// travel room above or below the band: a band positioned near the top of the
+// screen (bandPos <= deadZoneFrac — well within the sliders' range) would
+// otherwise make the "up" trigger mathematically unreachable, since offset's
+// minimum possible value is -center. A single source of truth for this cap
+// matters because a second caller re-deriving it from raw cfg values (not the
+// capped result) can silently reintroduce that unreachable-trigger bug — this
+// happened once already, when wink tracking used to drive decide() by
+// synthesizing a fake on-screen gaze point rather than calling it directly
+// (see the `winkIntent` explicit-intent channel below, which replaced that
+// indirection entirely and so no longer needs this cap at all).
 export function deadZoneBounds(cfg, H) {
   const center = H * cfg.bandPos;
   const dead = cfg.deadZoneFrac * H;
@@ -40,6 +43,7 @@ export function deadZoneBounds(cfg, H) {
 // input: {
 //   now, dt, cfg, biasY,
 //   rawGaze: { x, y, t } | null,
+//   winkIntent: { dir: -1 | 1, strength: 0..1, t } | null,
 //   driftOn, snapOn, systemCentersDoc: number[],
 //   scrollY, docMax, viewportW, viewportH,
 // }
@@ -48,13 +52,99 @@ export function deadZoneBounds(cfg, H) {
 //   status: { cls, text }, zoneText, velText,
 //   scroll: null | { type: 'by', amount } | { type: 'to', y },
 // }
+//
+// `winkIntent` is an explicit "just scroll up/down" channel for signals that
+// were never a screen position in the first place (wink tracking's committed
+// left/right wink — see src/tracking/winkTracking.js). It's handled by its
+// own branch below, entirely separate from the gaze-point path: no sheet-
+// margin/on-screen check, no EMA smoothing, no dead-zone geometry, no drift
+// correction and no line-end detection apply to it, because none of those
+// exist to serve a real (x, y) position that this signal never had. This
+// replaces an earlier design where wink tracking synthesized a fake gaze
+// point positioned just past the dead-zone edge for decide() to re-derive a
+// direction from — workable, but fragile: the synthesized point had to
+// exactly track decide()'s own (capped, per-direction) dead-zone geometry to
+// avoid landing back inside the zone it was meant to clear, which broke once
+// already (see PERSONAS.md section 5, finding on `deadZoneBounds`/
+// `winkTracking.js`). A real, direct intent channel can't reintroduce that
+// bug class at all, because it never derives a direction from geometry to
+// begin with. Still timestamp-gated (same 250ms freshness window as
+// `rawGaze`) so a stale/stuck value (e.g. left over after switching away from
+// wink tracking mid-session) can't drive scrolling forever.
 export function decide(state, input) {
   const {
-    now, dt, cfg, rawGaze, driftOn, snapOn, systemCentersDoc,
+    now, dt, cfg, rawGaze, winkIntent, driftOn, snapOn, systemCentersDoc,
     scrollY, docMax, viewportW: W, viewportH: H,
   } = input;
   let { smoothX, smoothY, snapTarget, curZone, zoneSince, scrollCarry } = state;
   let biasY = input.biasY;
+
+  const freshIntent = winkIntent && (now - winkIntent.t) < 250;
+  if (freshIntent) {
+    const dir = winkIntent.dir; // -1 = up, 1 = down
+    const label = dir < 0 ? 'up' : 'down';
+
+    if (snapOn && systemCentersDoc.length) {
+      if (snapTarget != null) {
+        const step = (snapTarget - scrollY) * Math.min(1, dt * 6);
+        const arriving = Math.abs(snapTarget - (scrollY + step)) < 2;
+        return {
+          state: { smoothX, smoothY, snapTarget: arriving ? null : snapTarget, curZone, zoneSince, scrollCarry },
+          biasY,
+          status: { cls: 's-good', text: 'snapping…' },
+          zoneText: 'snap', velText: String(Math.round(dt ? step / dt : 0)),
+          scroll: arriving ? { type: 'to', y: snapTarget } : { type: 'by', amount: step },
+        };
+      }
+      const center = H * cfg.bandPos;
+      const bandDocY = scrollY + center;
+      const next = dir > 0
+        ? systemCentersDoc.find((y) => y > bandDocY + 8)
+        : [...systemCentersDoc].reverse().find((y) => y < bandDocY - 8);
+      if (next != null) {
+        let nextZone = curZone, nextSince = zoneSince, nextTarget = snapTarget;
+        if (curZone !== dir) { nextZone = dir; nextSince = now; }
+        if (now - nextSince >= cfg.holdMs) {
+          nextTarget = dir > 0
+            ? Math.min(docMax, Math.max(0, next - center))
+            : Math.max(0, next - center);
+          nextZone = 0;
+        }
+        return {
+          state: { smoothX, smoothY, snapTarget: nextTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry },
+          biasY,
+          status: { cls: 's-good', text: dir > 0 ? 'advance → snap' : 'back a system' },
+          zoneText: label, velText: '0', scroll: null,
+        };
+      }
+      return {
+        state: { smoothX, smoothY, snapTarget, curZone: 0, zoneSince, scrollCarry },
+        biasY,
+        status: { cls: 's-good', text: 'reading' },
+        zoneText: 'read', velText: '0', scroll: null,
+      };
+    }
+
+    // smooth mode: strength maps directly to speed — there's no continuous
+    // position to derive a proportional magnitude from, unlike the gaze path.
+    const mag = Math.min(1, Math.max(0, winkIntent.strength));
+    const vIntent = dir * mag * cfg.maxSpeed;
+    let nextZone = curZone, nextSince = zoneSince;
+    if (dir !== curZone) { nextZone = dir; nextSince = now; }
+    const engaged = (now - nextSince) >= cfg.holdMs;
+    const v = engaged ? vIntent : 0;
+    let nextCarry = scrollCarry + v * dt;
+    const whole = Math.trunc(nextCarry);
+    nextCarry -= whole;
+
+    return {
+      state: { smoothX, smoothY, snapTarget, curZone: nextZone, zoneSince: nextSince, scrollCarry: nextCarry },
+      biasY,
+      status: { cls: 's-good', text: engaged ? 'following' : 'hold…' },
+      zoneText: label, velText: String(Math.round(v)),
+      scroll: whole !== 0 ? { type: 'by', amount: whole } : null,
+    };
+  }
 
   const fresh = rawGaze && (now - rawGaze.t) < 250;
   if (!fresh) {

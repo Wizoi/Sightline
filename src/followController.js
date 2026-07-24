@@ -15,6 +15,7 @@ function tick(now) {
   const result = decide(followState, {
     now, dt, cfg, biasY: state.biasY,
     rawGaze: state.rawGaze,
+    winkIntent: state.winkIntent,
     driftOn: state.driftOn, snapOn: state.snapOn, systemCentersDoc: state.systemCentersDoc,
     scrollY: window.scrollY,
     docMax: Math.max(0, document.documentElement.scrollHeight - window.innerHeight),

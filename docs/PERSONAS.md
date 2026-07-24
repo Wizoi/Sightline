@@ -44,6 +44,26 @@ blendshapes), rigid-body head-pose estimation, wink/blink detection.
 - A blink (both eyes closing together) must be distinguished from a wink (one eye) — checked via
   the *gap* between the two eyes' blink scores, not just an absolute threshold on one eye. See
   Applied Mathematician persona for how that gap threshold is personally calibrated.
+- **Backlog item A4, closed (2026-07-23): `irisTracking.js`'s blink gate now uses the same
+  `eyeBlinkLeft`/`eyeBlinkRight` blendshape scores winkTracking.js already relied on**, instead of
+  the EMA-ratio heuristic (`state.openEMA` chasing a running-average eye-openness ratio,
+  blinking when the current ratio dropped below half of it) that used to gate iris-mode gaze/
+  calibration-sample capture. Confirmed first, rather than assumed, that blendshapes were already
+  being requested from the model: `camera.js`'s `FaceLandmarker.createFromOptions` already passes
+  `outputFaceBlendshapes: true` on both the GPU and CPU-fallback code paths (needed by
+  winkTracking.js, which shipped first) — no new cost to enable, this was a pure signal-source
+  swap in `irisTracking.js` alone. New gate: `Math.max(left, right) > 0.3` (reusing
+  `winkLogic.js`'s `DEFAULT_CLOSED_THRESHOLD` reasoning — real deliberate winks clear ~0.3 against
+  a ~0.1 resting baseline) returns null for that frame, same contract as before (still gates both
+  the returned gaze point and calibration-sample capture). Deliberately *simpler* than
+  winkTracking.js's gap-based left-vs-right logic: this gate only needs "is either eye
+  mid-closure, i.e. is the iris position untrustworthy right now," not "which eye, wink or
+  blink" — a single fixed threshold suffices, and (unlike the EMA it replaced) needs no running
+  per-user baseline that could itself drift under lighting/pose changes. Removed the
+  now-fully-unused `state.openEMA` field from `appState.js`. Verified via a new colocated
+  `src/tracking/irisTracking.test.js` (7 tests: gate closed/open, blink vs. merely-lower-but-open
+  eye, calibration-sample push/no-push) plus the full existing suite — all 292 tests pass (285 +
+  7 new), no regressions.
 - Auto-frame (crop + upscale around the detected face before running the landmark model) gives
   more effective pixels-per-eye when the user sits back from the laptop, and periodically widens
   back to the full frame to re-lock if tracking is lost. Manual zoom prefers the webcam's own
@@ -189,9 +209,63 @@ pivoting, feature standardization, 1D k-means, gap-based clustering.
 **Open questions / future research:**
 - Whether a per-user *nonlinear* wink threshold (rather than the current linear interpolation)
   would help outlier faces — no evidence yet that it's needed.
-- Confidence/uncertainty estimates on the calibration fit (e.g. leave-one-out residuals across
-  the 9 points) to proactively suggest recalibration, rather than only reacting to a changed
-  camera/window fingerprint (`calibMismatch`).
+
+**Item A3 closed (2026-07-23): leave-one-out (LOO) residual check at `finishCalibration()` time,
+surfacing a proactive recalibration prompt independent of `calibMismatch`.**
+- **The gap this closes:** the fit's own training residual is close to useless as a quality
+  signal here — a 7-parameter model fit on ~9 points can drive its *training* error to near zero
+  almost regardless of whether the fit actually generalizes, since there's so little slack (2
+  spare points) to reveal overfitting. LOO is the right tool specifically because it's "free" at
+  this scale: 9 points means 9 cheap refits (each a 7×7 `solveLin` on 8 points), giving a genuine
+  held-out prediction error per point rather than a training-error number that can't distinguish
+  a good fit from a memorized one.
+- **What was built** (`src/lib/calibrationModel.js`): `looResiduals(calibPoints, ridgeLambda)`
+  refits `fitCalibration` once per point with that point excluded, then evaluates the excluded
+  point's own `(rx,ry,bH,bV)` against the refit model and compares to its actual `(sx,sy)` target
+  — returning `{ index, dx, dy, dist }` per point (`dist` = Euclidean distance in screen-fraction
+  units, the same 0-1 space `sx`/`sy` already live in). `gridSpacingThreshold(calibPoints)`
+  derives a "meaningfully bad" cutoff **from the actual calibration grid used**, not a hand-picked
+  constant: half the smallest spacing between distinct target columns/rows. The reasoning: a LOO
+  error past that would place the predicted point closer to an *adjacent* calibration target than
+  to the true one — a concrete, interpretable failure ("the model would have confused this click
+  with a neighboring one"), not an arbitrary number. For the app's real 9-point grid (`sx` ∈
+  {0.1,0.5,0.9}, `sy` ∈ {0.12,0.5,0.88}) this works out to `min(0.4, 0.38)/2 ≈ 0.19`. Falls back to
+  a conservative constant (0.15) only for a degenerate/non-grid point set with no real spacing to
+  derive from (shouldn't occur via the app's own `runCalibration()`, but the function is written
+  to be safe if ever called on something else). `calibrationQuality(calibPoints)` ties these
+  together into one summary (`worst`, `worstIndex`, `threshold`, `poorIndices`, `poor`), guarding
+  the degenerate `<4`-point case by returning a non-poor empty result rather than computing
+  something meaningless off too little data.
+- **Wired into `finishCalibration()`** (`src/calibration.js`): after the real fit is computed and
+  saved (a poor LOO result doesn't block saving — it's still the best model available, exactly
+  the same "surfaced for review, never silently substituted or blocked" pattern already used
+  elsewhere in this codebase for barline counts / time-sig detection, see OMR persona), `poor`
+  triggers the **existing** `showRecalBanner()` mechanism (`src/ui.js`) — the same banner already
+  used for a changed camera/window fingerprint (`calibMismatch`) — rather than inventing a second
+  "your calibration might be bad" UI. This directly addresses the framing in the original backlog
+  item: `calibMismatch` only reacts to a changed *setup*; this reacts to the fit *itself* being
+  poor even on the very setup it was just captured on (bad point placement, a mistimed click, a
+  tracking glitch mid-capture) — a real, complementary failure mode `calibMismatch` structurally
+  cannot see since it never looks at the calibration data itself, only environment metadata.
+- **Threshold honesty, as instructed:** the `min-grid-spacing/2` rule is grounded in something
+  real (the app's own calibration geometry) and is more principled than an arbitrary magnitude
+  guess, but it has **not been validated against real problematic-calibration session data** —
+  no corpus of "sessions a user later reported as inaccurate, with their raw calibration points
+  captured" exists to check this against, and none was fabricated to fake that validation. Treat
+  0.19 (screen-fraction) as a conservative, clearly-reasoned starting point, not a tuned constant
+  — if real usage ever surfaces either false-positive recal prompts on calibrations users are
+  actually happy with, or a missed genuinely-bad session, that's the evidence to retune this
+  against, the same "verify against real data, don't tune blind" discipline used everywhere else
+  in this project (see OMR persona's `minFrac`/`pad`/rotation-threshold write-ups for the pattern
+  this is following).
+- **Verified:** 12 new colocated unit tests in `src/lib/calibrationModel.test.js` — a clean
+  noise-free 9-point grid produces near-zero LOO residuals and `poor: false`; corrupting one
+  point's recorded gaze reading (simulating a glance-away or tracking glitch mid-capture, target
+  unchanged) reliably flags exactly that point as the worst offender and flips `poor: true`;
+  `gridSpacingThreshold` is checked directly against the real 9-point grid's derived value and
+  against a degenerate all-identical-point fallback case; a too-few-points input returns a safe
+  non-poor empty result rather than throwing or fabricating a number. Full suite:
+  `npm test` — 297 passed (was 285; +12 new, 0 regressions).
 
 ---
 
@@ -1147,6 +1221,114 @@ Fat Burger despite being purpose-built for exactly this case.**
   formal-structure marker rather than an instrument change, exactly as already documented above. Nothing
   to fix here specifically -- it's a correct detection of a real, if differently-typed, boundary.
 
+**Follow-up (2026-07-23, later same day): the "geometry adjustment" branch of the proposed next
+step above, confirmed for one file — Fat Burger prints its measure numbers BELOW the staff, not
+above.** Rendered and visually inspected real full pages from Fat Burger (the corpus's own
+regression-guard file for this investigation) to check the two branches the prior write-up left
+open — sparse source printing vs. a geometry mismatch. For Fat Burger specifically, it's geometry:
+the engraving prints a number under literally every measure, with rehearsal letters in boxes above
+the staff instead (`locateMeasureNumber()`'s "look above the staff" assumption was pointed at the
+wrong region for this file's own convention, not looking for something that wasn't there). **Fix
+built:** `lib/measureNumberLocate.js` gained `locateMeasureNumberBelow()` (mirrors the existing
+above-staff locator, scanning `systemBottom + 0.08..1.0` staff-heights, calibrated against this
+file's own real rendered pixels — a ~2-9pt gap before the number, a ~50pt+ clear gap before the
+next system's own content begins); `ocr.js`'s `ocrNumbersByBox()` tries the above-staff box first
+and only falls through to the below-staff box if that one fails the confidence gate, so files where
+the above-staff read already works are completely unaffected; `scoreText.js`'s
+`extractMeasureNumbers()` got the equivalent `padBelow` extension for the text-layer path. 4 new
+unit tests, full suite green (307 passing), lint clean, no regressions on any of the other 3
+regression-guard files.
+- **Real, honest limit of this fix, confirmed by re-running the benchmark before and after: zero
+  movement in any of the scanned/OCR group's aggregate numbers** (77.6%/28.6%/86.1%/85.7% —
+  identical). Fat Burger's own raw `measuresPerSystem` data did change in several places (finer,
+  more accurate per-system counts where a below-staff number is now actually read instead of
+  missed) — a real, verified improvement to reading quality — but it doesn't move any *scored*
+  metric for this file: `systemCountAccuracy` is unaffected (261 detected vs. 391 true systems —
+  this fix reads numbers for systems already found, it doesn't find more systems), and
+  `sectionNameAccuracy` stays 0 (still "Score"/"Section 2" vs. 19 real instrument names — section
+  *naming* depends on the text-layer name-detection path, which this fix doesn't touch). **This is
+  a genuine, narrow improvement worth keeping, not a fix for "why section-splitting barely works
+  on scanned files" — that broader question is still open.**
+- **What this investigation did NOT resolve, and shouldn't be assumed resolved: whether Teutonia/
+  MonogramMarch/KingCotton's own sparse-OCR-data problem (documented above — 85% of Teutonia's
+  systems have zero usable measure-number reading at all) is the same below-staff-geometry issue
+  or the original "numbers genuinely printed sparsely in the source" theory.** The session that ran
+  this specific check ended before reaching a documented conclusion on those 3 files — this
+  write-up covers only what was independently confirmed afterward from the surviving code, its
+  tests, and a fresh benchmark run, not a claim about what that session concluded for the other
+  files. Follow-up investigation into those 3 specifically is the natural next step.
+
+**Follow-up (2026-07-23, later still): resolved for all 3 remaining files — Teutonia,
+MonogramMarch, and KingCotton all confirm the OTHER branch of the open question, the opposite of
+Fat Burger's.** Rendered real full pages of all three at scale 2.0-2.5 via a headless Chromium page
+driving pdfjs-dist directly (`getDocument`/`page.render` to a canvas, screenshotted — the same
+technique class as the Fat Burger session, no app/dev-server needed since this only needed pixels +
+`getTextContent()`, not the app's own detection code), and visually inspected a spread of
+instruments/pages per file (Teutonia: Piccolo, Oboe, Eb Clarinet, Tenors, Flute — pages 2,3,4,6,15;
+MonogramMarch: Flute, Oboe — pages 2,4,5,6; KingCotton: Piccolo, Solo Cornet, Baritone Sax — pages
+1,3,12,20). **Verdict: sparse/absent-printing confirmed (theory a) for all three — none of them
+prints a per-system measure number anywhere in their scanned parts, above the staff, below the
+staff, or anywhere else.** This is not the same finding as "OCR can't read it" — the numerals
+simply aren't there to read.
+- **What IS actually printed in the exact region `locateMeasureNumber()` scans, identified
+  precisely this time (a real upgrade on the prior session's looser "notation/clef clusters,
+  rehearsal marks" description) — three distinct real numeral types that are legitimate printed
+  digits, just never a measure number:**
+  1. **Multi-measure-rest counts.** A horizontal thick bar (the standard multi-bar-rest glyph) with
+     a small number directly above it stating how many measures it spans — confirmed on Teutonia
+     p2 ("2" over 2 rest-measures, later "3" and "8" over longer rests) and KingCotton p20 (boxed
+     "3" appearing twice over separate multi-bar rests). This is the single most dangerous
+     false-friend for this heuristic: it's a real number, in the right general position (above the
+     staff, left-ish), that looks exactly as plausible as a genuine measure number until you check
+     what it's actually counting.
+  2. **Plate/catalog numbers.** KingCotton prints "173" at the very top-left of the FIRST system on
+     the Solo Cornet and Baritone Sax parts specifically (same position `locateMeasureNumber` grabs
+     for a real system-opening measure number) — identical across those parts (a document-level
+     plate number, not anything per-system or per-part), and reads as a perfectly legible number to
+     an OCR pass with no reason to distrust it structurally. Other parts of the same file (Piccolo)
+     instead print a different catalog code ("34007-11") at the page BOTTOM, outside either scan
+     region — confirming this varies by original print-run convention within a single file, not a
+     fixable single offset.
+  3. **Repeat-ending brackets ("1"/"2") and "Trio" labels.** Present on every file, every instrument
+     — a real printed "1" or "2" bracketed at a repeat, or the word "Trio" marking the second-strain
+     entry point. Neither denotes measure count.
+- **The one real per-system, per-measure numbering convention found in this whole exercise is the
+  same shape as the "genuine text-layer" pages already known about, not a new one**: both Teutonia
+  (page 3, "FLUTE" part) and MonogramMarch (pages 4-5, "MONOGRAM MARCH-FLUTE") contain a single
+  MODERN re-typeset part mixed into an otherwise all-scanned, decades-old engraving — confirmed via
+  `getTextContent()` returning hundreds of real text items on exactly those pages (`"1"`, `"2"`,
+  `"49"`, `"50"` etc. as literal, isolated text runs) vs. zero items on every scanned page. That
+  modern part numbers literally every measure with a small italic number above the barline — this
+  is where the previously-documented "first 12 of Teutonia's 79 systems have a genuine reading"
+  comes from: not 12 systems spread across the document, but ALL 12 systems of that one Flute page
+  (its whole part fits on one rotated page). KingCotton has no such page at all — `getTextContent()`
+  returned zero items on literally all 40 pages, confirming it's a pure scan cover-to-cover with no
+  modern-engraving exception anywhere.
+- **No fix attempted, per this task's own explicit instruction not to force one under theory
+  (a).** There is no real per-system measure number in these files' scanned parts for
+  `locateMeasureNumber()`/`locateMeasureNumberBelow()` to find under any geometry adjustment — the
+  gap is the source content, not the scan region. Inventing a detector that manufactures a "measure
+  number" out of a rest-count or a plate number would be strictly worse than the current behavior
+  (Tesseract's confidence gate silently rejecting these, or `locateInBand` finding nothing to
+  locate at all): the barline-count fallback already handles "no reliable number reading" correctly
+  and gracefully for exactly this case. Confirmed the already-shipped `locateMeasureNumberBelow()`
+  (Fat Burger's fix) doesn't regress anything here either — the below-staff margin is genuinely
+  blank ink on every sampled system across all three files, so it correctly returns `null` (no ink
+  blob to find) rather than grabbing something spurious.
+- **No code was touched this session** (`measureNumberLocate.js`, `scoreText.js`, `ocr.js`,
+  `scoreAnalysis.js` are all unchanged from the Fat Burger session's own commit), so no test run or
+  benchmark re-run was needed or performed — the existing benchmark numbers for the scanned/OCR
+  group already reflect the correct, unchanged behavior for these 3 files.
+- **This closes out the open question left by both prior write-ups**: of the 4 files investigated
+  across this whole thread, exactly 1 (Fat Burger) was a genuine geometry mismatch (numbers below
+  the staff, now fixed), and 3 (Teutonia, MonogramMarch, KingCotton) are genuine sparse/absent
+  source printing where the honest, safest thing this pipeline can do is exactly what it already
+  does — fail to find a number and let the barline-count fallback carry the file. Any future push
+  on this specific class of scanned/OCR file's accuracy should look elsewhere (e.g. the
+  already-flagged flat 28.6% section-name accuracy across every OCR-fallback commit), not at
+  `locateMeasureNumber`'s own geometry again — this corpus has now been checked from both branches
+  and both are exhausted for these 4 files specifically.
+
 **Every mean in the benchmark's output now ships with its own population stddev** (`scoring.mjs`'s
 `stddev()`, `run.mjs`'s `summarizeGroup()`, `report.mjs`'s trend table) -- found necessary
 because the flat-looking ~80% system-count mean above was hiding real movement in BOTH directions
@@ -1299,6 +1481,204 @@ naming bug) that fell out of the same investigation:**
   session (the 4 Full-band-arrangements regression-guard files were independently confirmed
   byte-for-byte unchanged throughout, per the git-stash A/B evidence above). All 39 files scored
   with 0 errors both before and after.
+
+**Literature/prior-art research pass (2026-07-23, Feature Strategy-directed), checking five of this
+persona's own detection techniques against academic OMR literature and real open-source OMR
+projects (Audiveris, oemer, homr) for alternatives, improvements, or adjacent ideas — not a
+re-spike of anything already answered above. Verdicts below, organized by file/technique:**
+
+- **Page-rotation auto-correction (`lib/pageRotation.js`) — the academic "deskew" literature
+  mostly doesn't apply here, because it's solving a different problem than this code has.** The
+  large body of document-skew-detection work (Hough transform, Radon transform, projection-profile
+  variance maximization) targets *continuous-angle* skew — a scanned page sitting a few degrees
+  crooked on the platen — and is normally paired with a sub-pixel rotate-and-resample step. This
+  code's actual bug (confirmed on real files, see the wrong-`/Rotate`-flag write-up above) is a
+  *discrete*, already-known-to-be-one-of-4 problem: a PDF page's declared `/Rotate` flag is
+  sometimes flatly wrong (0 vs. 90 vs. 180 vs. 270), not that the page content itself is drawn at a
+  slight angle. Applying full Hough/Radon machinery to pick among 4 fixed candidates would be
+  solving a harder, more general problem than the one that actually exists in this corpus — **not
+  worth prototyping**, the existing `scoreOrientation`/`chooseRotation` ink-run-count approach is
+  already the right-sized tool and is calibrated against real files.
+  - **A real, different, and so-far-untested question this surfaces rather than answers: does any
+    file in the real corpus have *continuous* few-degree skew** (e.g. a phone-photographed page,
+    as opposed to a flatbed-scanned or notation-software-exported one)? None of the confirmed real
+    bugs to date involve this — every one is a 90°-multiple `/Rotate` flag error — but the target
+    audience's "minority scanned/photographed" case (persona 6) could plausibly include one someday.
+    If it ever does, a lightweight *variance-of-row-ink-count-vs-rotation-angle* sweep (the same
+    `scoreOrientation` signal, just swept over a fine angle range near 0/90/180/270 instead of only
+    those 4 exact values) would be the natural, cheap extension — genuinely worth prototyping *if
+    and when* a real skewed file actually surfaces, but not speculatively now; no evidence yet that
+    it's needed.
+  - **Tesseract's OSD (orientation & script detection) mode was checked as a possible "already-
+    solved, reuse it" shortcut, since `tesseract.js` is already a lazy-loaded dependency for OCR
+    fallback** — it works by classifying connected-component shapes against synthetically-rendered
+    text at each of the 4 candidate rotations, i.e. the exact same "which rotation makes shapes
+    correctly readable" idea, just for prose text instead of staff lines. **Not adopted**: it's
+    fundamentally a *text* orientation detector, and its confidence signal comes from letterform
+    recognition — for a music page (mostly staff lines, noteheads, and often little or no running
+    text on an interior page) it would have far less to work with than this app's own staff-line
+    ink-run signal, which is the actually-reliable structural feature on a page like this. Would
+    also force loading the OCR worker on every page just to probe rotation, undermining the "OCR is
+    lazy, only for genuinely image-only pages" design this codebase already deliberately keeps.
+  - **A MediaPipe "document scanner" angle (raised as a possible thread, per this app's existing
+    MediaPipe dependency) doesn't exist** — Google's on-device document-scanning/deskew capability
+    is an Android ML Kit feature, not a MediaPipe Tasks (web) solution; nothing to adopt here, dead
+    end confirmed rather than left open.
+
+- **Staff/system detection (`lib/systemDetection.js`) — the one genuinely adoptable idea found: both
+  Audiveris and oemer group staves into systems primarily via *barline continuity/alignment*, not
+  (only) gap statistics.** Audiveris's GRID step gathers staves into systems "based on barlines found
+  on the left side of the staves" plus detected brace/bracket connector glyphs; oemer (a from-scratch
+  deep-learning OMR system, not Audiveris's classical pipeline) reports the same underlying idea in a
+  different form — it "parses the barline information to infer possible grouping of tracks," i.e. a
+  barline stroke that visibly continues unbroken from one staff's band down through the gap into the
+  next staff's band is itself strong, direct, geometric evidence those two staves belong to the same
+  system — a fundamentally different and more *direct* signal than this codebase's current approach
+  (`kmeans2` bimodal clustering purely on staff-center *gap sizes*, with no reference to what's
+  actually drawn in that gap). **Worth prototyping, not adopted yet:** this app already has the exact
+  building block needed — `barlineDetection.js`'s column run-length ink scan already finds
+  full-height vertical strokes within one system's own band; extending that same scan to check
+  whether a candidate barline column's ink run *also* continues across the inter-staff gap between
+  two adjacent detected staves would be a cheap, no-new-dependency, purely-geometric second signal to
+  corroborate (or override) the current gap-based grouping decision — plausibly a more direct fix for
+  some of the still-open residual cases this persona's own write-up already flags as irregular
+  per-system staff counts (e.g. "My Happy Life," "Arno Andiam Romanza," where the current
+  perfectly-uniform-groups requirement declines to merge a real but irregularly-instrumented system).
+  Not attempted in this pass (out of scope — research only), but concrete enough to hand to a future
+  session: reuse `findInkBlobs`/the barline column scan across the *inter-staff* band, not just the
+  intra-system one.
+  - **The ML-based route (oemer's/homr's UNet segmentation models) is explicitly not worth
+    it, exactly as the task's own framing anticipated.** Confirmed via oemer's own README: model
+    checkpoints are large enough that first download is documented as "up to 10 minutes" — this is
+    squarely the "a second multi-hundred-MB ML model" case already ruled out by this project's
+    privacy/architecture posture (one ~13MB MediaPipe download is the app's one accepted heavy
+    asset; a second, much larger one for a problem the existing classical approach already handles
+    adequately for this audience's single-staff-part-common-case is not worth it). No genuinely
+    lightweight ML alternative for staff/system segmentation was found in this search — every
+    real learned-segmentation OMR project is UNet-or-larger scale, not a few-hundred-KB model.
+  - **Academic staff-line detection research (the "stable paths" algorithm, Capela/Rebelo et al.,
+    and its several follow-ups) targets a harder, different problem than this app has**: robust
+    detection on *handwritten* or badly-degraded scores where staff lines are curved, broken, or
+    inconsistently spaced — the paper's own framing is explicit that printed scores are already
+    comparatively well-handled by simpler methods, and it's specifically handwritten-music
+    recognition that "remains below expectations." This app's real corpus (persona 6: cleanly
+    engraved band parts as the common case, scanned/photographed booklets as a real but minority
+    case) has never needed anything past straightforward horizontal-ink-run scanning + 1D
+    clustering — **not worth prototyping**, it solves a problem this app's real files don't
+    actually have.
+
+- **OCR fallback / measure-number location (`ocr.js`, `lib/measureNumberLocate.js`) — no better
+  lightweight browser-feasible localization technique was found than what's already built, and a
+  real full-OMR system's own documented approach is actually *less* targeted than this app's.**
+  Audiveris delegates all text recognition (including, presumably, measure numbers — not
+  separately documented as its own subproblem anywhere found) straight to Tesseract's own general
+  text-block detection across the page, with no dedicated "find one isolated small numeral above a
+  staff" step at all. This app's own two-method design (`BOX`: geometric ink-blob localization,
+  narrowly targeted per system, then OCR just that crop at PSM 8; `STRIP`: hand the whole left
+  margin to Tesseract's own PSM-11 sparse-text layout analysis and correlate results by position)
+  already covers both ends of this spectrum — the narrowly-targeted approach AND the "let generic
+  OCR do its own layout analysis" approach a reference OMR system relies on exclusively. **Verdict:
+  this app's existing dual-method approach is already more sophisticated than what a real, mature
+  reference OMR project documents doing for this exact subproblem — nothing to adopt from
+  Audiveris here.**
+  - **One classical-CV technique worth naming as a possible future refinement to the `BOX`
+    locator specifically, not a replacement:** MSER (Maximally Stable Extremal Regions), the
+    standard scene-text-detection primitive for finding text-like blobs of consistent contrast
+    across multiple thresholds, is more tolerant of touching/low-contrast ink than the current
+    single-threshold ink-run blob finder (`findInkBlobs`). **Marked "worth prototyping only if a
+    real corpus file surfaces a genuine location failure that isn't already explained by the
+    numbers simply not being printed every system"** — this persona's own already-recorded
+    investigation (Teutonia/MonogramMarch/KingCotton/Fat Burger OCR starvation) found the real
+    blocking issue on that corpus was upstream of localization entirely (the source engraving may
+    not print a number every system at all), so a better blob-finder wouldn't have helped that
+    specific, already-diagnosed case — no evidence yet that the *localization* step itself, as
+    opposed to what it's given to find, is the bottleneck anywhere in the real corpus.
+  - **No academic literature specifically on "OMR measure-number reading" as its own studied
+    subproblem was found** — every full-OMR paper/system found treats measure numbers as generic
+    page text (an OCR job), not a music-notation-specific recognition problem worth its own
+    dedicated technique. This is itself a useful negative finding: this app's narrowly-scoped
+    ink-geometry pre-locate step is a genuinely uncommon (not just under-published) refinement,
+    not a reinvention of an existing documented technique.
+
+- **PDF text-layer section/tempo/measure-number-reset detection (`lib/scoreText.js`,
+  `lib/scoreSections.js`, `lib/tempoSchedule.js`) — confirmed: nothing meaningfully comparable
+  exists in the literature or in real open-source OMR projects, and that's a genuine finding, not a
+  failed search.** Every OMR paper, dataset, and open-source project found (oemer, homr, Audiveris,
+  the LEGATO/LEGATO-2 vision-LM line of work, several PDF-to-MusicXML commercial tools) targets
+  *image* input — pixels in, symbols out — with zero use of a PDF's own embedded text objects as a
+  metadata source, even when the input PDF is itself a "born-digital" (notation-software-exported,
+  not scanned) file where a real text layer demonstrably exists. The closest adjacent published
+  idea found, "extraction of information from born-digital PDF documents" (a reproducible-research/
+  document-analysis paper, not music-specific), confirms the general *technique* (parsing a PDF's
+  real text/vector content stream instead of rasterizing and re-recognizing it) is sound and used
+  elsewhere, but nobody has applied it to this specific music-score metadata problem — this
+  project's own approach here is a genuinely novel (if narrow and low-effort-to-discover) niche, not
+  a known-and-adoptable-from-elsewhere technique this write-up somehow missed. **No action item —
+  there's nothing to adopt, and the existing approach is already correctly described elsewhere in
+  this section as "a different, easier problem than full OMR," not a walk-back of that verdict.**
+  One tangential but real observation while researching this: commercial "PDF/image → MusicXML"
+  tools (e.g. Newzik, PDFtoMusicXML) advertise materially higher accuracy specifically on
+  "born-digital" PDF input than on scans — consistent with (not contradicting) this project's own
+  finding that a real text layer is a much stronger signal than pixels wherever it's available,
+  just applied by those tools to full symbolic OMR rather than to the narrower
+  section/tempo/measure-number metadata this app actually needs.
+
+- **Time-signature glyph shape-matching (`lib/timeSigMatch.js`, `timeSigDetection.js`) — the
+  existing backlog item (bundle real engraving-font reference glyphs) is confirmed low-cost and
+  license-clear, and a cheaper zero-new-dependency alternative is worth trying first.**
+  - **Bravura (the reference SMuFL font) is SIL Open Font License-licensed — free to bundle,
+    embed, and redistribute, including in a project like this one** (the only restrictions are
+    against selling the font standalone and against reusing the reserved name "Bravura" for a
+    modified derivative — neither applies to using it as-is for template rendering). SMuFL also
+    defines fixed codepoints for time-signature digits (`timeSig0`-`timeSig9`, U+E080-U+E089) — so
+    the swap from the current `ctx.font = 'bold ...px sans-serif'` template generator to a bundled
+    Bravura webfont is a small, mechanical change to `getDigitTemplates()` in `timeSigMatch.js`
+    (load a self-hosted `@font-face`, same pattern already established for MediaPipe/tesseract.js
+    self-hosting — see Privacy/Architecture persona — then render the SMuFL codepoint instead of
+    the plain digit character), not a redesign of the matching algorithm itself. **This confirms
+    backlog item B2 is worth doing, and de-risks it further than it already was** — license was the
+    one unverified assumption behind it going in.
+  - **A real caveat worth flagging alongside that confirmation, not found until actually checking:
+    Bravura is one specific engraving font family among several in real-world use** (Finale
+    historically defaults to its own proprietary Maestro/Broadway-style fonts; MuseScore's own
+    current default is Leland, a Bravura-derived-but-distinct sibling; Dorico and most
+    SMuFL-conscious tools do use Bravura or something close to it) — bundling Bravura templates
+    should meaningfully improve match confidence over a generic UI sans-serif for *many* real files,
+    but won't be a perfect match for every notation-software vendor's own digit glyph shapes. Worth
+    validating against a handful of real files from different source software (this project's own
+    39-file corpus almost certainly spans more than one originating tool) before assuming Bravura
+    templates alone close the gap completely — a reasonable, well-scoped first step, not
+    guaranteed to be the whole fix.
+  - **A genuinely cheaper alternative worth prototyping BEFORE bundling any font, and not
+    previously considered in the existing write-up: feed the same already-built high-resolution
+    candidate-region crop (the 10x re-render `timeSigDetection.js` already produces) to
+    `tesseract.js` instead of (or alongside) the grid-Jaccard shape matcher.** This has a real,
+    concrete cost advantage over both the Bravura-template plan and an ONNX-based classifier: no
+    new dependency and no new bundle weight at all for the files that matter most to this app's
+    audience (persona 6's engraved-common-case), since `tesseract.js` and its self-hosted worker/
+    model are already a lazy-loaded dependency for the OCR measure-number fallback — the only new
+    cost is possibly triggering that same lazy load on a text-layer PDF that would otherwise never
+    need OCR at all (a real but small, one-time-per-analysis cost, not a bundle-size cost). A
+    general OCR model trained on varied real-world fonts and shapes is also very plausibly *more*
+    tolerant of an unfamiliar engraving font's digit shapes than a rigid single-template Jaccard
+    grid comparison is — genuinely untested here, but a real, falsifiable, cheap thing to try
+    (render the same crop already produced, run it through the existing PSM-8 single-word Tesseract
+    path already built for measure numbers, compare confidence/accuracy against the current
+    matcher) before spending effort on either bundling a font or a learned classifier.
+  - **A small ONNX Runtime Web-based CNN digit classifier was checked and is NOT worth it given
+    this project's real constraints, confirming (not just assuming) the size math**: a trained
+    MNIST-scale model itself can be genuinely tiny (a few hundred KB), but the WASM *runtime*
+    onnxruntime-web needs to execute it is not — the default (non-simd/non-threaded) `.wasm` binary
+    alone is documented at ~10.5MB, comparable to this app's entire existing MediaPipe download,
+    for a problem (10 digits + a handful of common time signatures) that a few-hundred-KB
+    hand-rolled grid comparison already solves algorithmically, with only the *reference data*
+    (not the algorithm) needing improvement. Paying a second MediaPipe-sized download for this
+    narrow a symbol set is not a good trade — **not worth prototyping**, exactly the "narrow
+    symbol set, glyph-matching is the pragmatic right call" framing the task itself anticipated.
+    (MNIST-trained digit shapes are also the wrong reference distribution anyway — trained on
+    handwritten digits, not engraved music-font numerals — so even a minimal model would need its
+    own from-scratch training data, not an off-the-shelf MNIST checkpoint, adding real effort on
+    top of the runtime-size problem.)
 
 ---
 
@@ -1474,6 +1854,56 @@ hold-debounce, leaky-integrator drift correction, eased snapping.
   import the capped computation itself, not re-derive an uncapped version from the same raw
   inputs** — this is the same "geometry beats a second re-derivation" class of bug as the original
   dead-zone cap fix above, just one hop further from where the cap was first added.
+  **Superseded (2026-07-23) by removing the synthesized point entirely — see the `winkIntent`
+  finding below, backlog item A2.** This finding (and the fix it describes) is kept verbatim as the
+  historical record of why the A2 refactor mattered, not because the synthesized-point code path
+  still exists.
+
+- **(A2, 2026-07-23) `decide()` now takes an explicit `winkIntent` channel instead of wink
+  synthesizing a fake gaze point at all — closing the bug *class* the A1 fix above only patched one
+  instance of.** The prior design (`winkTracking.js` computing a screen-fraction point positioned
+  just past `deadZoneBounds`'s capped dead-zone edge, scaled by wink strength, for `decide()` to
+  re-derive an up/down direction from) worked but stayed structurally fragile: *any* future change
+  to `decide()`'s dead-zone/band geometry had to be mirrored in `winkTracking.js`'s point-placement
+  math, or the exact A1 bug class (a synthesized point landing back inside the zone it was meant to
+  clear) could reappear in a new shape. **Fix:** `decide()` gained a new optional input,
+  `winkIntent: { dir: -1 | 1, strength, t } | null` — a direct "scroll up"/"scroll down" signal with
+  no screen position at all. Handled in its own branch, checked *before* the gaze-point path: it
+  reuses the exact same downstream zone/hold-hysteresis/snap-vs-smooth-mode machinery (`curZone`/
+  `zoneSince`/`scrollCarry`, `cfg.holdMs`, the snap-target easing) so wink's feel (hold-to-commit,
+  proportional smooth-mode speed) is unchanged, but skips every gaze-point-only concern entirely —
+  no EMA smoothing, no sheet-margin/on-screen check, no dead-zone geometry, no drift correction, no
+  line-end detection — because none of those exist to serve an (x, y) position this signal never
+  had. Same 250ms timestamp-freshness gate as `rawGaze` (defense in depth against a stale/stuck
+  value, e.g. left over after switching tracking types mid-session). `winkTracking.js` now just
+  returns `{ intent: 'up' | 'down', strength }` directly from its existing wink-commit logic — no
+  geometry, no `deadZoneBounds` import, no `cfg` import at all — and `camera.js` routes that into
+  `state.winkIntent` (a new, separate field from `state.rawGaze`) instead of a synthesized gaze
+  point; `followController.js` forwards it to `decide()` alongside (not instead of) `rawGaze`. **The
+  gaze/iris tracking call path is untouched** — this was a pure refactor for wink, verified by the
+  full existing `followLogic.test.js` gaze-path suite passing unmodified. **One real, expected side
+  effect, not a bug:** the "gaze dot" debug overlay (`Toggle gaze dot`) no longer shows a position
+  during wink tracking, since there's no synthesized screen position left to show — it was only ever
+  a side effect of the old hack, not a real gaze estimate, so this is a more honest UI state, not a
+  lost feature. Added dedicated `winkIntent` coverage to `followLogic.test.js` (smooth-mode hold/
+  scroll direction/speed scaling, snap-mode advance/retreat, priority over a simultaneously-present
+  `rawGaze`, staleness fallback, and a case at the exact `bandPos=0.12` config that used to make
+  "up" unreachable via the old rawGaze-synthesis path — demonstrating the new path is structurally
+  immune to that whole bug class rather than merely re-tested against the one known instance);
+  rewrote `winkTracking.test.js` around the new `{ intent, strength }` return contract (the old
+  tests asserting `uy` landed inside/past the capped dead-zone edge no longer apply, since
+  `winkTracking.js` no longer computes a `uy` at all). Full suite: 303 tests passing after the
+  change (was 285 before this session's two additions).
+
+- **(E2, 2026-07-23) Added `PageUp`/`PageDown` to `main.js`'s manual-scroll keyboard fallback,
+  alongside the existing `ArrowUp`/`ArrowDown` handling.** Real hardware value, not a cosmetic
+  addition: page-turn foot pedals aimed at this app's actual audience commonly send `PageUp`/
+  `PageDown` keycodes rather than arrow keys. Same scroll amount/direction as the existing Arrow
+  branches (`window.scrollBy(0, ±60)`), added as separate `e.code` branches rather than folding into
+  the existing Arrow conditions, specifically so the Arrow branches' behavior (no `preventDefault`)
+  stays byte-for-byte unchanged — `PageUp`/`PageDown` get their own `e.preventDefault()` because,
+  unlike arrow keys, the browser's own default action for them is to scroll the viewport by a full
+  page, which would otherwise double up with the manual `scrollBy()`.
 
 - **A DOM re-render doesn't invalidate geometry another feature already captured from it, unless
   something explicit makes that connection.** The same 2026-07-19 review found `pdf.js`'s
@@ -2059,13 +2489,16 @@ outstanding.
   isn't a new idea, it's persona 3's own documented reconsideration condition ("would need real
   engraving-font reference glyphs") being satisfied — low-medium effort, activates a feature that
   already ships inert with working plumbing.
-- **A2** — give `decide()` an explicit intent channel instead of wink synthesizing a fake gaze
+- **A2** — ~~give `decide()` an explicit intent channel instead of wink synthesizing a fake gaze
   point. A1 is already patched, so this is prevention of a bug *class* recurring, not an active
-  fix — worth doing before the next `decide()` geometry change, not urgently now.
-- **A3** — free LOO-residual validation at `finishCalibration()` time; low effort, proactive
-  recalibration prompts.
-- **A4** — switch `irisTracking.js`'s blink gate to the blendshape signal persona 1 already
-  concluded is better; low effort, closes a documented contradiction.
+  fix — worth doing before the next `decide()` geometry change, not urgently now.~~ **Done
+  (2026-07-23)** — see persona 5's write-up above.
+- **A3** — ~~free LOO-residual validation at `finishCalibration()` time; low effort, proactive
+  recalibration prompts.~~ **Done (2026-07-23)** — see Applied Mathematician persona's write-up
+  above.
+- **A4** — ~~switch `irisTracking.js`'s blink gate to the blendshape signal persona 1 already
+  concluded is better; low effort, closes a documented contradiction.~~ **Done (2026-07-23)** —
+  see persona 1's write-up above.
 - **B4** — extract shared `detectStaffRows` to stop `analyzeScore()` and `systemDetection.js`
   duplicating tuned thresholds (the exact kind of constant the minFrac episode showed does drift).
 - **B5** — per-system beats-per-line override for the confirmed real mixed-meter case (Alto
@@ -2073,10 +2506,18 @@ outstanding.
 - **D1** — One Euro filter for gaze smoothing. Solid argument, low-med effort, but no reported
   user complaint about the current EMA — do when touching `followLogic.js` next, not as a
   standalone session.
-- **E2** — PageUp/PageDown pedal keycodes; low effort, real value for hardware this audience
-  actually uses, just not urgent.
-- **E3** — one baseline ARIA pass (toast `aria-live`, tab roles, label associations); cheap, no
-  reason to keep deferring indefinitely, but not blocking anything.
+- **E2** — ~~PageUp/PageDown pedal keycodes; low effort, real value for hardware this audience
+  actually uses, just not urgent.~~ **Done (2026-07-23)** — see persona 5's write-up above.
+- **E3** — ~~one baseline ARIA pass (toast `aria-live`, tab roles, label associations); cheap, no
+  reason to keep deferring indefinitely, but not blocking anything.~~ **Done (2026-07-23)** —
+  `index.html`: `role="tablist"` on `.tabBar`, `role="tab"`/`aria-selected`/`aria-controls` on
+  `#tabTracking`/`#tabAutoScroll`, `role="tabpanel"`/`aria-labelledby` on their two panels,
+  `role="status"`/`aria-live="polite"`/`aria-atomic="true"` on `#toast`, `role="alert"` on
+  `#recal`, `aria-label` on the unlabeled `#presetName` text input, and `for`/`id` association on
+  every settings-panel `<label>` that lacked it (~15 sliders/selects). `src/tabsUI.js`'s
+  `selectTab()` now also flips `aria-selected` alongside the existing `.active` class toggle, so
+  it stays in sync on every tab switch, not just at initial page load. Markup/attributes only — no
+  behavior change, verified by the full existing suite passing unmodified.
 - **B3** — sharpen the full-OMR revisit trigger from "a lightweight ML model turns up" to the
   specific, checkable condition: ONNX-exported OMR models (the `oemer`-class reference point)
   becoming small/fast enough under `onnxruntime-web`/WebGPU. Documentation-only change to the

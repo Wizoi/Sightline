@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { locateMeasureNumber } from './measureNumberLocate.js';
+import { locateMeasureNumber, locateMeasureNumberBelow } from './measureNumberLocate.js';
 
 // isInk from a set of filled rectangles { r0, r1, c0, c1 } (inclusive).
 function inkFrom(rects) {
@@ -38,5 +38,41 @@ describe('locateMeasureNumber', () => {
 
   it('returns null when the band above the staff is empty', () => {
     expect(locateMeasureNumber(inkFrom([{ r0: 50, r1: 60, c0: 2, c1: 8 }]), base)).toBeNull();
+  });
+});
+
+describe('locateMeasureNumberBelow', () => {
+  // staff bottom at row 60 (systemBottom), staff 20px tall, page 100px wide --
+  // mirrors the real "Fat Burger" shape: a real gap between the staff bottom
+  // and the number, then the number, then nothing until well past bandBelowFar.
+  const base = { systemBottom: 60, staffHeight: 20, width: 100 };
+
+  it('boxes a number sitting below the staff', () => {
+    const isInk = inkFrom([
+      { r0: 68, r1: 76, c0: 2, c1: 8 }, // number: ~0.4 staffHeight below systemBottom
+    ]);
+    expect(locateMeasureNumberBelow(isInk, base)).toEqual({ x0: 2, y0: 68, x1: 9, y1: 76 });
+  });
+
+  it('does not reach into the next system (bandBelowFar stops well short)', () => {
+    const isInk = inkFrom([
+      { r0: 68, r1: 76, c0: 2, c1: 8 },     // this system's own number
+      { r0: 95, r1: 110, c0: 2, c1: 30 },   // the NEXT system's own staff/clef, further below
+    ]);
+    expect(locateMeasureNumberBelow(isInk, base)).toEqual({ x0: 2, y0: 68, x1: 9, y1: 76 });
+  });
+
+  it('returns null when nothing prints below the staff at all', () => {
+    expect(locateMeasureNumberBelow(inkFrom([]), base)).toBeNull();
+  });
+
+  it('captures a two-digit number as one box, same as the above-staff variant', () => {
+    const isInk = inkFrom([
+      { r0: 68, r1: 76, c0: 2, c1: 6 },
+      { r0: 68, r1: 76, c0: 8, c1: 12 },
+    ]);
+    const box = locateMeasureNumberBelow(isInk, base);
+    expect(box.x0).toBe(2);
+    expect(box.x1).toBe(13);
   });
 });

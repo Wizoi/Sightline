@@ -138,6 +138,90 @@ describe('decide: up trigger stays reachable when the band sits near the top', (
   });
 });
 
+describe('decide: winkIntent explicit intent channel', () => {
+  // Wink tracking calls decide() directly with a { dir, strength, t } intent
+  // instead of synthesizing a fake rawGaze point (see winkTracking.js and
+  // PERSONAS.md section 5, item A2) — these mirror the equivalent rawGaze-
+  // driven tests above, but via the intent channel, and with no rawGaze at
+  // all (it should never be consulted while a fresh winkIntent is present).
+
+  it('withholds scrolling until the hold delay elapses, then scrolls down for a "down" intent', () => {
+    const input1 = baseInput({ now: 1000, winkIntent: { dir: 1, strength: 1, t: 990 } });
+    const r1 = decide(createFollowState(), input1);
+    expect(r1.zoneText).toBe('down');
+    expect(r1.status.text).toBe('hold…');
+    expect(r1.scroll).toBeNull();
+
+    const input2 = baseInput({ now: 1400, dt: 0.4, winkIntent: { dir: 1, strength: 1, t: 1390 } });
+    const r2 = decide(r1.state, input2);
+    expect(r2.status.text).toBe('following');
+    expect(r2.scroll.amount).toBeGreaterThan(0);
+  });
+
+  it('scrolls up for an "up" intent', () => {
+    const input1 = baseInput({ now: 1000, winkIntent: { dir: -1, strength: 1, t: 990 } });
+    const r1 = decide(createFollowState(), input1);
+    expect(r1.zoneText).toBe('up');
+
+    const input2 = baseInput({ now: 1400, dt: 0.4, winkIntent: { dir: -1, strength: 1, t: 1390 } });
+    const r2 = decide(r1.state, input2);
+    expect(r2.scroll.amount).toBeLessThan(0);
+  });
+
+  it('scales scroll speed with intent strength', () => {
+    const r1a = decide(createFollowState(), baseInput({ now: 1000, winkIntent: { dir: 1, strength: 0.1, t: 990 } }));
+    const r2a = decide(r1a.state, baseInput({ now: 1400, dt: 0.4, winkIntent: { dir: 1, strength: 0.1, t: 1390 } }));
+
+    const r1b = decide(createFollowState(), baseInput({ now: 1000, winkIntent: { dir: 1, strength: 1, t: 990 } }));
+    const r2b = decide(r1b.state, baseInput({ now: 1400, dt: 0.4, winkIntent: { dir: 1, strength: 1, t: 1390 } }));
+
+    expect(r2b.scroll.amount).toBeGreaterThan(r2a.scroll.amount);
+  });
+
+  it('reaches the up trigger even when the band sits near the top of the screen — structurally immune to the dead-zone-cap class of bug, since it never derives a direction from band geometry at all', () => {
+    const topBandCfg = { ...cfg, bandPos: 0.12 }; // the exact config that used to make "up" unreachable via rawGaze
+    const input1 = baseInput({ cfg: topBandCfg, now: 1000, winkIntent: { dir: -1, strength: 1, t: 990 } });
+    const r1 = decide(createFollowState(), input1);
+    expect(r1.zoneText).toBe('up');
+    const input2 = baseInput({ cfg: topBandCfg, now: 1400, dt: 0.4, winkIntent: { dir: -1, strength: 1, t: 1390 } });
+    const r2 = decide(r1.state, input2);
+    expect(r2.scroll.amount).toBeLessThan(0);
+  });
+
+  it('drives snap mode: advances to the next system on a "down" intent, retreats on "up"', () => {
+    const systemCentersDoc = [100, 500, 900];
+    const input1 = baseInput({ now: 1000, snapOn: true, systemCentersDoc, winkIntent: { dir: 1, strength: 1, t: 990 } });
+    const r1 = decide(createFollowState(), input1);
+    expect(r1.status.text).toBe('advance → snap');
+    expect(r1.state.snapTarget).toBeNull();
+
+    const input2 = baseInput({ now: 1400, snapOn: true, systemCentersDoc, winkIntent: { dir: 1, strength: 1, t: 1390 } });
+    const r2 = decide(r1.state, input2);
+    expect(r2.state.snapTarget).toBe(100); // next system (500) minus band center (400)
+
+    const input3 = baseInput({ now: 1000, snapOn: true, systemCentersDoc, scrollY: 500, winkIntent: { dir: -1, strength: 1, t: 990 } });
+    const r3 = decide(createFollowState(), input3);
+    expect(r3.status.text).toBe('back a system');
+  });
+
+  it('ignores rawGaze entirely while a fresh winkIntent is present', () => {
+    // rawGaze here is positioned to be "looking away" (off-sheet) — if it
+    // were consulted at all, this would report 'off', not a wink direction.
+    const input = baseInput({
+      now: 1000, rawGaze: { x: 990, y: 400, t: 990 },
+      winkIntent: { dir: 1, strength: 1, t: 990 },
+    });
+    const r = decide(createFollowState(), input);
+    expect(r.zoneText).toBe('down');
+  });
+
+  it('falls back to the rawGaze/no-gaze path once the intent goes stale', () => {
+    const stale = baseInput({ now: 1000, winkIntent: { dir: 1, strength: 1, t: 700 } }); // 300ms old
+    const r = decide(createFollowState(), stale);
+    expect(r.status.text).toBe('no gaze — hold');
+  });
+});
+
 describe('decide: drift correction', () => {
   it('nudges biasY toward center only when drift is on and reading', () => {
     const input = baseInput({ driftOn: true, biasY: 0, rawGaze: { x: 300, y: 450, t: 990 } });

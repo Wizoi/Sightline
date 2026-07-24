@@ -1,7 +1,7 @@
 import { cfg, state } from './appState.js';
-import { $, calibEl, video, toast, setStatus, hideRecalBanner } from './ui.js';
+import { $, calibEl, video, toast, setStatus, showRecalBanner, hideRecalBanner } from './ui.js';
 import { median } from './lib/mathUtils.js';
-import { fitCalibration, calibMismatch as calibMismatchPure } from './lib/calibrationModel.js';
+import { fitCalibration, calibrationQuality, calibMismatch as calibMismatchPure } from './lib/calibrationModel.js';
 import { canFollow } from './tracking/index.js';
 
 export const calibMismatch = calibMismatchPure;
@@ -54,14 +54,27 @@ function finishCalibration() {
   state.gnorm = gnorm; state.coefX = coefX; state.coefY = coefY;
   state.calibFp = currentFingerprint();
   saveCalibration();
-  hideRecalBanner();
   calibEl.style.display = 'none';
   state.calibrated = true;
   $('calibBtn').textContent = '🎯 Recalibrate';
   $('testBtn').disabled = false;
   $('runBtn').disabled = !canFollow();
-  setStatus('', 'calibrated & saved — check accuracy or follow');
-  toast('Calibration saved');
+
+  // Free-with-9-points sanity check: leave-one-out residuals catch a poor
+  // calibration (bad point placement, camera hiccup mid-session) directly,
+  // rather than only reacting to a later camera/window fingerprint change
+  // (calibMismatch, below). Reuses the existing recal-banner UI rather than
+  // inventing a second "your calibration is bad" mechanism.
+  const quality = calibrationQuality(state.calibPoints);
+  if (quality.poor) {
+    showRecalBanner(['calibration fit looks imprecise for one or more points']);
+    setStatus('s-warn', 'calibrated & saved — fit looks imprecise, consider recalibrating');
+    toast('Calibration saved (accuracy may be low)');
+  } else {
+    hideRecalBanner();
+    setStatus('', 'calibrated & saved — check accuracy or follow');
+    toast('Calibration saved');
+  }
 }
 
 /* ---------------------------------------------------------------------- *

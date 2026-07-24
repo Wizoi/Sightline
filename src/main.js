@@ -89,6 +89,13 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); $('runBtn').click(); }
   else if (e.code === 'ArrowDown') window.scrollBy(0, 60);
   else if (e.code === 'ArrowUp') window.scrollBy(0, -60);
+  // Page-turn foot pedals commonly send PageUp/PageDown keycodes rather than
+  // arrow keys — same scroll amount/direction as the Arrow fallback above.
+  // preventDefault() since (unlike arrow keys) the browser's own default for
+  // PageUp/PageDown is to scroll the viewport by a full page, which would
+  // otherwise double up with the manual scrollBy() here.
+  else if (e.code === 'PageDown') { e.preventDefault(); window.scrollBy(0, 60); }
+  else if (e.code === 'PageUp') { e.preventDefault(); window.scrollBy(0, -60); }
   else if (e.key.toLowerCase() === 'c') runCalibration();
   else if (e.key.toLowerCase() === 'r') recenter();
   else if (e.key.toLowerCase() === 'b') { $('showBand').click(); }

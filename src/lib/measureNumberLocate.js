@@ -16,15 +16,14 @@ import { findInkBlobs } from '../timeSigDetection.js';
 // ink predicate; systemTop is the row of the top staff line; staffHeight is
 // rowMax - rowMin; width is the page width in px. Returns { x0, y0, x1, y1 }
 // (half-open in x, inclusive in y) or null if no number-like blob is found.
-export function locateMeasureNumber(isInk, {
-  systemTop, staffHeight, width,
-  leftFrac = 0.2,     // measure numbers live in the far-left margin
-  bandAbove = 1.6,    // how far above the staff to look (× staff height)
-  bandBelow = 0.05,   // stop just above the top staff line (music is on/below it)
-} = {}) {
-  const rowTop = Math.max(0, Math.round(systemTop - bandAbove * staffHeight));
-  const rowBot = Math.round(systemTop - bandBelow * staffHeight);
-  const colEnd = Math.max(1, Math.round(width * leftFrac));
+// Shared core: given an explicit row-scan range (rowTop..rowBot, in the
+// direction the caller wants scanned first, i.e. nearest-to-farthest from
+// the staff) and a left-margin column cutoff, isolates one number-shaped ink
+// box. Used by both locateMeasureNumber (scans upward, away from the staff)
+// and locateMeasureNumberBelow (scans downward, away from the staff) --
+// direction only affects how the caller computes rowTop/rowBot, the scan
+// itself always runs low-row-to-high-row same as before.
+function locateInBand(isInk, { rowTop, rowBot, colEnd, staffHeight }) {
   if (rowBot <= rowTop) return null;
 
   // Step 1 — the number's FIRST DIGIT: the left-most ink blob (small mergeGap so
@@ -70,4 +69,50 @@ export function locateMeasureNumber(isInk, {
   if (x0 === null) return null;
 
   return { x0, y0, x1: x1 + 1, y1 };
+}
+
+export function locateMeasureNumber(isInk, {
+  systemTop, staffHeight, width,
+  leftFrac = 0.2,     // measure numbers live in the far-left margin
+  bandAbove = 1.6,    // how far above the staff to look (× staff height)
+  bandBelow = 0.05,   // stop just above the top staff line (music is on/below it)
+} = {}) {
+  const rowTop = Math.max(0, Math.round(systemTop - bandAbove * staffHeight));
+  const rowBot = Math.round(systemTop - bandBelow * staffHeight);
+  const colEnd = Math.max(1, Math.round(width * leftFrac));
+  return locateInBand(isInk, { rowTop, rowBot, colEnd, staffHeight });
+}
+
+// Mirrors locateMeasureNumber for a different, real, confirmed engraving
+// convention: some scores print the per-measure number BELOW the staff
+// instead of above it (a real 2008 scanned combo/jazz chart, "Fat Burger" --
+// see docs/PERSONAS.md persona 3 -- prints a number under literally every
+// measure, with rehearsal letters in boxes above instead). systemBottom is
+// the row of the BOTTOM staff line (the caller's rowMax). bandBelowNear/Far
+// are calibrated directly against that real file's own rendered pixels: its
+// number sits ~0.13 staff-heights below the staff with a real ~2+
+// staff-height clear gap before the next system's own content begins, so
+// bandBelowNear=0.08/bandBelowFar=1.0 keeps real margin on both sides
+// without ever reaching into a neighboring system.
+//
+// This can misfire on a clef's own descending tail (a treble clef commonly
+// dips below the staff on a system's very first measure, closer to the
+// staff than the number itself is) -- accepted, not specially handled here:
+// the caller OCRs whatever this locates through the same digit-only,
+// confidence-gated Tesseract pass already relied on to reject every other
+// non-number crop this heuristic-only (no OCR) locator can't itself tell
+// apart from a real number (see docs/PERSONAS.md persona 3's OCR-pipeline
+// write-up) -- a mis-located clef tail is expected to score low confidence
+// and be silently dropped, the same "surfaced only when confident, never a
+// wrong guess" pattern as the rest of this pipeline.
+export function locateMeasureNumberBelow(isInk, {
+  systemBottom, staffHeight, width,
+  leftFrac = 0.2,
+  bandBelowNear = 0.08,
+  bandBelowFar = 1.0,
+} = {}) {
+  const rowTop = Math.round(systemBottom + bandBelowNear * staffHeight);
+  const rowBot = Math.round(systemBottom + bandBelowFar * staffHeight);
+  const colEnd = Math.max(1, Math.round(width * leftFrac));
+  return locateInBand(isInk, { rowTop, rowBot, colEnd, staffHeight });
 }

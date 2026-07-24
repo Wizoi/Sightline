@@ -301,13 +301,33 @@ export function findSectionTitle(pageItems, pageRows, knownNames, { leftMarginX 
 // surfaced it. pad=20 keeps a real margin over that observed ~10pt while
 // staying well under typical system-to-system spacing, so it can't reach
 // into a neighboring system's own number.
-export function extractMeasureNumbers(pageItems, systemsOnPage, { pad = 20 } = {}) {
+//
+// padBelow does the same job for a DIFFERENT, real, confirmed convention:
+// some engravings (a real 2008 scanned combo/jazz chart, "Fat Burger" --
+// see docs/PERSONAS.md persona 3) print the number BELOW the staff instead
+// of above it, one per measure. Measured directly off that real file's
+// rendered pixels (converted to PDF points): the number's own ink sits only
+// ~2-9pt below the staff's bottom edge, with a genuine ~50pt+ gap before the
+// next system's own content begins -- padBelow=20 keeps the same real
+// margin-over-observed-offset design as `pad` above, and stays nowhere near
+// reaching a neighboring system.
+// distToBand: 0 if y already sits within the system's own [yBottom, yTop]
+// band, else the distance to whichever edge is nearer -- generalizes the old
+// "closest to yTop" tie-break so a real BELOW-staff candidate isn't always
+// out-ranked by a merely-closer-to-yTop false positive (a stray chord-symbol
+// digit, say) sitting above a different system's own number.
+function distToBand(y, sys) {
+  if (y > sys.yTop) return y - sys.yTop;
+  if (y < sys.yBottom) return sys.yBottom - y;
+  return 0;
+}
+export function extractMeasureNumbers(pageItems, systemsOnPage, { pad = 20, padBelow = 20 } = {}) {
   const numberItems = pageItems.filter((it) => /^\d+$/.test(it.str.trim()));
   const results = [];
   for (const sys of systemsOnPage) {
-    const candidates = numberItems.filter((it) => it.y <= sys.yTop + pad && it.y >= sys.yBottom);
+    const candidates = numberItems.filter((it) => it.y <= sys.yTop + pad && it.y >= sys.yBottom - padBelow);
     if (!candidates.length) continue;
-    const best = candidates.reduce((a, b) => (Math.abs(b.y - sys.yTop) < Math.abs(a.y - sys.yTop) ? b : a));
+    const best = candidates.reduce((a, b) => (distToBand(b.y, sys) < distToBand(a.y, sys) ? b : a));
     results.push({ systemIndex: sys.index, measureNumber: parseInt(best.str.trim(), 10) });
   }
   return results;

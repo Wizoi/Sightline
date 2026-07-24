@@ -1,10 +1,22 @@
 import { state } from '../appState.js';
-import { eyeRatios, blendVec } from '../lib/gazeMath.js';
+import { eyeRatios, blendVec, eyeBlinkScores } from '../lib/gazeMath.js';
 import { applyX, applyY } from '../lib/calibrationModel.js';
 
 export const id = 'iris';
 export const label = 'Iris tracking';
 export const needsCalibration = true;
+
+// MediaPipe's per-eye blink blendshape score is a purpose-built,
+// model-computed eye-closure signal (0 = open, 1 = fully closed) — see
+// lib/gazeMath.eyeBlinkScores and lib/winkLogic.js's DEFAULT_CLOSED_THRESHOLD
+// (0.3), which real deliberate winks were observed to clear against a resting
+// baseline around ~0.1. This gate only needs to catch "eye(s) mid-closure, iris
+// position untrustworthy" — not distinguish a wink from a blink the way
+// winkTracking.js does — so a single fixed threshold on whichever eye is more
+// closed is enough; no per-user calibration or running baseline needed, unlike
+// the EMA-ratio heuristic this replaces (which chased a per-user resting
+// openness that could itself drift under lighting/pose changes).
+const BLINK_THRESHOLD = 0.3;
 
 // Per frame: extract pose-invariant eye-direction features, blink-gate them
 // (so blinks don't spike the gaze estimate or pollute calibration), feed a
@@ -15,10 +27,8 @@ export function onFrame(lm, res, procW, procH) {
   const r = eyeRatios(lm, state.usePose, procW, procH);
   const b = blendVec(res); r.bH = b.bH; r.bV = b.bV;
 
-  if (state.openEMA == null) state.openEMA = r.open;
-  const blinking = state.openEMA > 0 && r.open < 0.5 * state.openEMA;
-  if (!blinking) state.openEMA += 0.03 * (r.open - state.openEMA);
-  if (blinking) return null;
+  const { left, right } = eyeBlinkScores(res);
+  if (Math.max(left, right) > BLINK_THRESHOLD) return null;
 
   if (state.capturing) state.capturing.samples.push(r);
 

@@ -78,20 +78,22 @@ function applyToggles(t) {
 
 // Setup UI depends on whether the active Tracking Type needs a 9-point
 // calibration flow at all (iris tracking does; wink tracking doesn't), and
-// hides controls that provably do nothing under wink tracking:
+// hides controls that provably do nothing under wink tracking. Wink drives
+// followLogic.decide() via its own explicit `winkIntent` channel (see
+// followLogic.js / winkTracking.js), which is a direct up/down/strength
+// signal, not a screen position — none of the gaze-point machinery below
+// applies to it at all (not just "always trivially satisfied" the way it was
+// under the old synthesized-point design):
 //   - Recenter / Drift: both only ever adjust or consume biasX/biasY, which
-//     winkTracking.js's synthesized point never reads or contributes to.
-//   - "Turn the page when my eyes reach…" (rightZoneFrac): only consulted
-//     inside decide()'s `inBand && smoothX > rightStart` branches, and a
-//     wink's synthetic point is deliberately always *outside* the band
-//     (that's what makes it trigger), so inBand is never true for it.
-//   - "Ignore glances past the sides" (sheetMargin): only gates the
-//     horizontal on-screen check against a fixed ux=0.5, which is always
-//     comfortably inside any reachable margin value.
+//     the winkIntent branch never reads or writes.
+//   - "Turn the page when my eyes reach…" (rightZoneFrac) / "Ignore glances
+//     past the sides" (sheetMargin): both are gaze-point-only concepts (the
+//     right-zone/line-end check, the on-sheet-x check) that the winkIntent
+//     branch has no equivalent of — a wink is just "up" or "down".
 //   - Head-pose comp: only affects lib/gazeMath.eyeRatios, which wink
 //     tracking (lib/gazeMath.eyeBlinkScores) never calls.
 //   - Eye-tracking smoothing: smooths a continuously-varying gaze position;
-//     wink's point is a fixed target the instant a wink commits.
+//     the winkIntent branch never runs decide()'s EMA smoothing step at all.
 function applyTrackingTypeUI() {
   const isWink = state.trackingType === 'wink';
   const needsCalib = getActiveTracking().needsCalibration;

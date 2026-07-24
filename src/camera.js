@@ -143,6 +143,13 @@ function predict() {
     // (0 = open, 1 = fully closed).
     $('wkL').textContent = state.winkScores.left.toFixed(2);
     $('wkR').textContent = state.winkScores.right.toFixed(2);
+    // Wink tracking reports a direct scroll intent, not a screen position —
+    // route it straight to followLogic.decide()'s `winkIntent` input (see
+    // followController.js) instead of treating it as a gaze point at all.
+    state.winkIntent = result
+      ? { dir: result.intent === 'up' ? -1 : 1, strength: result.strength, t: performance.now() }
+      : null;
+    return;
   }
   if (result) {
     const sx = Math.min(1, Math.max(0, result.ux)), sy = Math.min(1, Math.max(0, result.uy));

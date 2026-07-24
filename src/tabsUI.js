@@ -13,6 +13,7 @@ function selectTab(activeBtnId) {
   TABS.forEach(({ btn, panel }) => {
     const active = btn === activeBtnId;
     $(btn).classList.toggle('active', active);
+    $(btn).setAttribute('aria-selected', String(active));
     $(panel).classList.toggle('hidden', !active);
   });
   // The reading band is an Eye/Wink-tracking concept -- applyBand() itself

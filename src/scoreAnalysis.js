@@ -12,7 +12,7 @@ import {
   chooseMeasureReadings, computeWarnings,
 } from './lib/scoreAssembly.js';
 import { detectTimeSignature } from './timeSigDetection.js';
-import { locateMeasureNumber } from './lib/measureNumberLocate.js';
+import { locateMeasureNumber, locateMeasureNumberBelow } from './lib/measureNumberLocate.js';
 import { ocrNumbersByBox, ocrNumbersByStrip, terminateOcr } from './ocr.js';
 import { scoreOrientation, chooseRotation } from './lib/pageRotation.js';
 
@@ -179,12 +179,24 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
   const rowScale = boxCanvas.height / ah;
   const boxes = [];
   for (const s of systemsOnPage) {
+    const staffHeight = (s.rowMax - s.rowMin) * rowScale;
     const box = locateMeasureNumber(isInk, {
       systemTop: s.rowMin * rowScale,
-      staffHeight: (s.rowMax - s.rowMin) * rowScale,
+      staffHeight,
       width: boxCanvas.width,
     });
-    if (box) boxes.push({ systemIndex: s.index, box });
+    // boxBelow: a fallback candidate for engravings that print the number
+    // BELOW the staff instead (a real scanned combo/jazz chart -- see
+    // docs/PERSONAS.md persona 3). Always located (cheap, pure ink-geometry,
+    // no OCR yet); ocrNumbersByBox only actually OCRs it when `box` itself
+    // fails the confidence gate, so a file where `box` already works is
+    // unaffected by this being present.
+    const boxBelow = locateMeasureNumberBelow(isInk, {
+      systemBottom: s.rowMax * rowScale,
+      staffHeight,
+      width: boxCanvas.width,
+    });
+    if (box || boxBelow) boxes.push({ systemIndex: s.index, box, boxBelow });
   }
   const boxEntries = await ocrNumbersByBox(boxCanvas, boxes);
 
