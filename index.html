@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-B-TXA34M.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-6veAMoqj.css">
+  <script type="module" crossorigin src="./assets/index-N6PzpeYc.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-CorIohxH.css">
 </head>
 <body>
 
@@ -42,27 +42,39 @@
   <div id="trackingPanel" class="tabPanel" role="tabpanel" aria-labelledby="tabTracking">
     <label for="trackingType">Tracking type</label>
     <select id="trackingType"></select>
-    <button id="camBtn">🎥 Start camera</button>
-    <button id="calibBtn" disabled title="Follow one moving dot with your eyes for about 15 seconds">🎯 Calibrate</button>
-    <button id="calibFallbackBtn" disabled title="Fallback: click nine fixed dots instead of following a moving one. Try this if the moving-dot calibration doesn't work well for you.">🎯 Calibrate (9-dot fallback)</button>
-    <button id="testBtn" disabled>📏 Check accuracy</button>
+    <div class="row">
+      <button id="camBtn">🎥 Camera</button>
+      <button id="calibBtn" disabled title="Follow one moving dot with your eyes for about 20 seconds">🎯 Calibrate</button>
+      <button id="testBtn" disabled title="Measure how accurately tracking is landing right now">📏 Verify</button>
+    </div>
     <div id="winkStrengthRow">
       <label for="ws">Wink scroll strength <span class="val" id="wsv"></span></label>
       <input type="range" id="ws" min="0" max="100" value="50" />
       <div class="ends"><span>gentle</span><span>strong</span></div>
       <div class="ends" id="winkDebug"><span>left eye: <span class="val" id="wkL">–</span></span><span>right eye: <span class="val" id="wkR">–</span></span></div>
-      <button id="winkCalibrateBtn">🎯 Calibrate wink sensitivity</button>
+      <button id="winkCalibrateBtn" disabled>🎯 Calibrate wink sensitivity</button>
     </div>
 
     <div class="row">
       <button id="runBtn" disabled>▶ Follow eyes</button>
       <button id="showBand">Hide band</button>
     </div>
-    <div class="row">
-      <button id="snapBtn">▦ Snap: off</button>
-      <button id="driftBtn">🎯 Drift: off</button>
+    <!-- Retired from the UI (2026-07-25) but deliberately NOT deleted: real use
+         found Snap, Drift and the 9-dot calibration fallback weren't earning
+         their space in the panel. Every one of them still works and is still
+         wired up (settings persistence, applyTrackingTypeUI, systemDetection's
+         snap-count readout, main.js's handlers all reference these ids), so
+         they're hidden rather than removed — that keeps ~11 call sites working
+         untouched and makes re-enabling a one-line CSS change if any of them
+         earns its way back. -->
+    <div id="retiredControls" hidden>
+      <div class="row">
+        <button id="snapBtn">▦ Snap: off</button>
+        <button id="driftBtn">🎯 Drift: off</button>
+      </div>
+      <button id="calibFallbackBtn" disabled title="Fallback: click nine fixed dots instead of following a moving one.">🎯 Calibrate (9-dot fallback)</button>
     </div>
-    <button id="recenterBtn">⌖ Recenter to band center (R)</button>
+    <button id="recenterBtn" disabled>⌖ Recenter to band center (R)</button>
 
     <div class="group">The reading band</div>
 
@@ -109,13 +121,13 @@
       <button id="poseToggle" class="on">🧭 Head-pose comp: on</button>
       <button id="webcamToggle">Toggle camera preview</button>
       <button id="dotToggle">Toggle gaze dot</button>
-      <button id="showSys">Show detected systems</button>
+      <button id="showSys" disabled>Show detected systems</button>
     </details>
   </div>
 
   <div id="autoScrollPanel" class="tabPanel hidden" role="tabpanel" aria-labelledby="tabAutoScroll">
     <div class="sub">Analyze the score, confirm the tempo, then play — the page advances on its own from the top, in time.</div>
-    <button id="analyzeScoreBtn">🎵 Analyze score</button>
+    <button id="analyzeScoreBtn" disabled>🎵 Analyze score</button>
     <div id="autoScrollSummary" class="sub"></div>
     <div id="autoScrollTempoInfo" class="sub"></div>
     <div id="measureReadingsBox" class="hidden">
