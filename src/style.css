@@ -247,3 +247,9 @@ kbd { background:#21262d; border:1px solid #30363d; border-bottom-width:2px; bor
   border-radius: 6px; font-size: 13px; cursor: pointer;
 }
 .overlayCancel:hover { background: #232a34; }
+
+/* Retired-but-retained controls (see index.html): hidden explicitly rather
+   than relying only on the [hidden] attribute, since #panel .row sets
+   display:flex on a descendant and an explicit rule here removes any doubt
+   about which wins. Delete this rule to bring them back. */
+#retiredControls { display: none; }

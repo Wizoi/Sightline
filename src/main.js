@@ -1,6 +1,6 @@
 import './style.css';
 import { state } from './appState.js';
-import { $, toast, setStatus, showRecalBanner, hideRecalBanner, applyBand } from './ui.js';
+import { $, toast, setStatus, showRecalBanner, hideRecalBanner, applyBand, refreshControlStates } from './ui.js';
 import { loadPdf, renderAll } from './pdf.js';
 import { startCamera } from './camera.js';
 import {
@@ -146,6 +146,10 @@ window.addEventListener('orientationchange', scheduleReflow);
  * ---------------------------------------------------------------------- */
 const hadSaved = loadSettings();
 applyBand();
+// Establish the initial enabled/disabled state of every control that has a
+// prerequisite (camera, PDF, calibration), so nothing starts out looking
+// clickable before it can actually do anything.
+refreshControlStates();
 $('showBand').textContent = state.showBand ? 'Hide band' : 'Show band';
 setStatus('', hadSaved ? 'saved settings loaded' : 'idle');
 startFollowLoop();

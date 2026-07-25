@@ -64,3 +64,37 @@ export function showRecalBanner(reasons) {
 export function hideRecalBanner() {
   $('recal').style.display = 'none';
 }
+
+// Single place that decides which controls are clickable right now.
+// Previously each module flipped `disabled` on whichever buttons it happened
+// to know about, which left several controls looking available while doing
+// nothing when clicked (Recenter and wink calibration before the camera is
+// on; Analyze score with no PDF loaded). A button that appears enabled and
+// silently no-ops reads as a broken app rather than as a missing
+// prerequisite, so the rule here is: if it can't work yet, it's visibly
+// disabled, with a title saying what's missing.
+//
+// Lives in ui.js on purpose: nearly every module already imports from here,
+// and this file imports almost nothing, so calling it from camera/pdf/
+// calibration/accuracy/settings can't create an import cycle.
+export function refreshControlStates() {
+  const camReady = !!state.camReady;
+  const hasPdf = !!state.pdfDoc;
+  const calibrated = !!state.calibrated;
+
+  const gate = (id, ok, why) => {
+    const el = $(id);
+    if (!el) return;
+    el.disabled = !ok;
+    if (ok) el.removeAttribute('data-blocked');
+    else el.setAttribute('data-blocked', why);
+  };
+
+  gate('calibBtn', camReady, 'Start the camera first');
+  gate('calibFallbackBtn', camReady, 'Start the camera first');
+  gate('winkCalibrateBtn', camReady, 'Start the camera first');
+  gate('testBtn', camReady && calibrated, 'Calibrate first');
+  gate('recenterBtn', camReady && calibrated, 'Calibrate first');
+  gate('analyzeScoreBtn', hasPdf, 'Load a PDF first');
+  gate('showSys', hasPdf, 'Load a PDF first');
+}

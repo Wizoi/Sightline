@@ -56,6 +56,15 @@ export const state = {
   // small eye misalignments make the two eyes unequal predictors for some
   // people, and averaging then blends a good signal with a worse one.
   eyeMode: 'both',
+  // Whether the user has run the accuracy check ("Verify") against the
+  // CURRENT calibration. Gates "Follow eyes" for tracking types that need
+  // calibration, so the setup flow is a forced sequence -- camera, then
+  // calibrate, then verify -- rather than three independent buttons a user
+  // can skip past and then wonder why following behaves badly. Reset by a
+  // new calibration (a fresh fit hasn't been verified yet) and restored
+  // alongside a saved calibration, so a returning user isn't made to
+  // re-verify a setup they already checked.
+  verified: false,
   calibFp: null,
 
   biasX: 0,

@@ -1,5 +1,7 @@
 import { state } from './appState.js';
-import { $, toast } from './ui.js';
+import { $, toast, refreshControlStates } from './ui.js';
+import { canFollow } from './tracking/index.js';
+import { saveCalibration } from './calibration.js';
 import { median } from './lib/mathUtils.js';
 
 /* ---------------------------------------------------------------------- *
@@ -93,5 +95,14 @@ function finishTest(results, bright, noFace, frames, vHit, vTot) {
   if (!s.length) s.push('Looks solid — you should get reliable page turns. Leave Drift on and tap R to Recenter if it drifts.');
 
   $('accsug').innerHTML = s.map((x) => '<li>' + x + '</li>').join('');
+  // Completing the check is what unlocks "Follow eyes" for calibration-based
+  // tracking (see tracking/index.js's canFollow). Deliberately gated on
+  // FINISHING the run, not on the score being good: the point is that the
+  // user has seen their real accuracy and can decide, not that the app
+  // approves of it.
+  state.verified = true;
+  saveCalibration();
+  refreshControlStates();
+  $('runBtn').disabled = !canFollow();
   $('accres').style.display = 'flex';
 }

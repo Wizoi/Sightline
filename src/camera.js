@@ -1,6 +1,6 @@
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import { state } from './appState.js';
-import { $, video, setStatus, showRecalBanner } from './ui.js';
+import { $, video, setStatus, showRecalBanner, refreshControlStates } from './ui.js';
 import { loadCalibration, calibMismatch, currentFingerprint, calibModelId } from './calibration.js';
 import { getActiveTracking, canFollow } from './tracking/index.js';
 
@@ -53,8 +53,7 @@ export async function startCamera() {
     if (!state.autoFrame) setCameraZoom(parseFloat($('cz').value) / 100);
     state.camReady = true;
     $('camBtn').textContent = '🎥 Camera on';
-    $('calibBtn').disabled = false;
-    $('calibFallbackBtn').disabled = false;
+    refreshControlStates();
 
     // Restore a saved iris calibration by default (only relevant if iris
     // tracking is the active type); flag if the setup looks different.
@@ -65,8 +64,12 @@ export async function startCamera() {
       // is exactly the behavior they were fitted under.
       state.eyeMode = saved.eyeMode || 'both';
       state.calibFp = saved.fp || null; state.calibrated = true;
+      // Saved before this flag existed -> treat as verified, so an existing
+      // user isn't suddenly blocked from following by a check that didn't
+      // exist when they set up.
+      state.verified = saved.verified !== false;
       $('calibBtn').textContent = '🎯 Recalibrate';
-      $('testBtn').disabled = false;
+      refreshControlStates();
       const reasons = state.calibFp ? calibMismatch(state.calibFp, currentFingerprint()) : [];
       if (reasons.length) { showRecalBanner(reasons); setStatus('s-warn', 'calibration restored — ' + reasons[0]); }
       else setStatus('', 'calibration restored — ready');
@@ -78,6 +81,7 @@ export async function startCamera() {
     // Whichever branch ran above, re-check whether Follow-eyes can now be
     // enabled — a tracking type that doesn't need calibration (e.g. wink
     // tracking) should unlock it as soon as the camera (and a PDF) are ready.
+    refreshControlStates();
     $('runBtn').disabled = !canFollow();
     requestAnimationFrame(predict);
   } catch (e) {

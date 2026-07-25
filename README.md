@@ -88,17 +88,12 @@ keep the music there.
 the band (you've finished the line), or simply **look down** at the next system. A brief hold
 prevents accidental turns from a quick glance.
 
-**Snap to systems** (optional) makes the page jump so a whole *system* (a full line of music —
-including multi-instrument groups in a full score) lands centered in the band, instead of
-scrolling by raw pixels. Turn on *Show detected systems* to see what it found.
-
 **Pause instantly** with the spacebar — or with a **foot pedal**. A Bluetooth page-turner pedal
 usually sends a mouse click, and a click anywhere on the music toggles pause. Handy for the
 moments you look away and don't want the page to move.
 
 **Recenter** (the <kbd>R</kbd> key or the button) pops a target in the middle of the band; look
-at it for a second and tracking snaps back into alignment. **Drift** correction slowly keeps
-you centered over a long sitting.
+at it for a second and tracking snaps back into alignment.
 
 **Presets** let you save a whole setup (speed, band size, everything) per piece — a fast étude
 and a slow ballad can each have their own feel.
@@ -168,7 +163,7 @@ Webcam eye-tracking isn't laser-precise, but a good setup makes it reliable:
 - **Light your face** evenly (a lamp in front beats a bright window behind you).
 - Put the **camera near eye level** and sit roughly **centered** in its view.
 - Leave **Auto-frame** on — it zooms in on your face automatically so your eyes are well-resolved even if you sit back from the laptop.
-- With **Iris tracking**, use **Check accuracy** (in the **Eye/Wink** tab): it shows you 7 targets and reports how close your gaze lands, whether up/down or sideways is weaker, and your room brightness — with specific fixes. Aim for "you'd land on the right line" being high.
+- With **Iris tracking**, use **Verify** (in the **Eye/Wink** tab): it shows you 7 targets and reports how close your gaze lands, whether up/down or sideways is weaker, and your room brightness — with specific fixes. Aim for "you'd land on the right line" being high.
 - If it drifts mid-piece, tap <kbd>R</kbd> to recenter; if your setup changes (new camera, resized window), it'll suggest a quick recalibration. (Both are Iris-tracking concepts — Wink tracking has no drift to correct, since it never looks at a screen position.)
 
 ## Troubleshooting
@@ -179,11 +174,7 @@ secure context (HTTPS or `localhost`) — the hosted GitHub Pages link and `npm 
 
 **It keeps scrolling when I look away (Iris tracking).** That's tracking drift. Add light, tap
 <kbd>R</kbd> to recenter, or recalibrate — and use the pedal/spacebar pause when you glance away.
-Running *Check accuracy* will tell you what's off.
-
-**Snap won't advance.** Make sure a PDF is loaded and *Snap* is on; look down at the next
-system and hold briefly. If your score has unusual spacing, turn on *Show detected systems* to
-see whether it grouped the staves correctly.
+Running *Verify* will tell you what's off.
 
 **It feels inaccurate (Iris tracking).** Recalibrate, keeping your eyes on the moving dot the whole way and resisting the urge to glance ahead of it; improve
 lighting, and keep *Head-pose comp* on so moving your head doesn't throw it off.
@@ -222,18 +213,18 @@ restored automatically; it's re-validated if your camera or window size changes.
 </details>
 
 <details>
-<summary>Snap: detecting musical systems</summary>
+<summary>Detecting musical systems</summary>
 
-For Snap mode, Sightline renders each page and finds the **staff lines** (long horizontal
-strokes), clusters them into staves, then groups staves into systems — accepting the grouping
-only when it's consistent. That's why a four-staff clarinet-quartet score snaps by whole
-system, while a single-staff part snaps line by line.
+Sightline renders each page and finds the **staff lines** (long horizontal strokes), clusters
+them into staves, then groups staves into systems — accepting the grouping only when it's
+consistent. That's how a four-staff clarinet-quartet score is understood as whole systems while
+a single-staff part is read line by line. Auto-scroll's measure counting builds directly on this.
 </details>
 
 <details>
 <summary>Auto-scroll: measures and scheduling</summary>
 
-Analyzing a score for auto-scroll reuses the same staff-line/system detection as Snap, then
+Analyzing a score for auto-scroll reuses the same staff-line/system detection described above, then
 scans each system's columns for **barlines** (tall vertical strokes) to estimate its measure
 count. Those counts, together with your time signature and BPM, build a simple schedule — how
 long each system should take — that the scroll position and highlight interpolate through

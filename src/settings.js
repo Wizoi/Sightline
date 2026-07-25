@@ -1,5 +1,5 @@
 import { cfg, state } from './appState.js';
-import { $, gazeEl, toast, applyBand, setStatus } from './ui.js';
+import { $, gazeEl, toast, applyBand, setStatus, refreshControlStates } from './ui.js';
 import { detectSystems, renderSysMarks } from './systemDetection.js';
 import { renderAll } from './pdf.js';
 import { repositionAutoScroll } from './autoScrollController.js';
@@ -152,6 +152,7 @@ function applyTrackingTypeUI() {
   $('rightZoneRow').classList.toggle('hidden', isWink);
   $('sheetMarginRow').classList.toggle('hidden', isWink);
   $('poseToggle').classList.toggle('hidden', isWink);
+  refreshControlStates();
   $('runBtn').disabled = !canFollow();
 }
 
@@ -369,7 +370,7 @@ export function initSettingsUI() {
   $('poseToggle').onclick = () => {
     poseEntry.set(!state.usePose);
     state.calibrated = false; state.coefX = state.coefY = null; state.gnorm = null;
-    $('runBtn').disabled = true; $('testBtn').disabled = true;
+    $('runBtn').disabled = true; refreshControlStates();
     $('calibBtn').textContent = '🎯 Calibrate';
     cancelPursuitCalibration();
     setStatus('s-warn', 'mode changed — recalibrate');

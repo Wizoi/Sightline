@@ -1,5 +1,5 @@
 import { cfg, state } from './appState.js';
-import { $, calibEl, video, toast, setStatus, showRecalBanner, hideRecalBanner } from './ui.js';
+import { $, calibEl, video, toast, setStatus, showRecalBanner, hideRecalBanner, refreshControlStates } from './ui.js';
 import { median } from './lib/mathUtils.js';
 import {
   fitCalibration, calibrationQuality, chooseEyeMode, projectEyeMode,
@@ -108,10 +108,14 @@ export function runCalibration() {
 function applyFittedModel(gnorm, coefX, coefY, { poor, poorReasons } = {}) {
   state.gnorm = gnorm; state.coefX = coefX; state.coefY = coefY;
   state.calibFp = currentFingerprint();
-  saveCalibration();
   state.calibrated = true;
+  // A fresh fit has not been checked yet, so it re-gates "Follow eyes"
+  // behind Verify (see tracking/index.js's canFollow). Set before
+  // saveCalibration so the persisted record matches.
+  state.verified = false;
+  saveCalibration();
   $('calibBtn').textContent = '🎯 Recalibrate';
-  $('testBtn').disabled = false;
+  refreshControlStates();
   $('runBtn').disabled = !canFollow();
   if (poor) {
     showRecalBanner(poorReasons || ['calibration fit looks imprecise for one or more points']);
@@ -325,7 +329,7 @@ export function currentFingerprint() {
 export function saveCalibration() {
   try {
     localStorage.setItem(CALIB_KEY, JSON.stringify({
-      model: calibModelId(), coefX: state.coefX, coefY: state.coefY, gnorm: state.gnorm, fp: state.calibFp, eyeMode: state.eyeMode, ts: Date.now(),
+      model: calibModelId(), coefX: state.coefX, coefY: state.coefY, gnorm: state.gnorm, fp: state.calibFp, eyeMode: state.eyeMode, verified: state.verified, ts: Date.now(),
     }));
   } catch (e) { /* storage may be unavailable (private browsing, quota) — calibration just won't persist */ }
 }
