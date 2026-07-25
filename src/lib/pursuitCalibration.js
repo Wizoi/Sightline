@@ -63,8 +63,52 @@ import { mean } from './mathUtils.js';
 // of the interior (a circle alone undersamples the center; a rectangle's
 // corners require an abrupt direction change the eye can't smoothly pursue
 // through) over one full sweep.
-export const CX = 0.5, CY = 0.5, AX = 0.4, AY = 0.38, FX = 3, FY = 4, PHASE = Math.PI / 2;
-export const DEFAULT_DURATION_SEC = 10;
+// FX/FY were 3/4 over a 10s sweep in the first shipped version. Real-user
+// testing (2026-07-25, first hands-on session with this flow) measured it
+// as clearly WORSE than the 9-dot grid on the app's own "Check accuracy"
+// test — ~70% "lands on the right line" across two runs vs ~83% for 9-dot —
+// while being strongly preferred for comfort. The most likely cause is
+// simply that the target moved too fast to pursue smoothly: at 3 horizontal
+// oscillations across 0.8 of screen width in 10s, peak target speed is
+// roughly 900px/s on a typical laptop display, well past the ~30°/s where
+// human smooth pursuit starts breaking down into catch-up saccades (at
+// which point the eye is repeatedly NOT on the target, and every sample
+// taken during a saccade is mislabeled). Lowered to 2/3 over 12s, which
+// cuts peak angular speed by ~45%. This is a reasoned correction to a
+// falsified starting guess, not a tuned constant — the honest next step is
+// re-measuring with "Check accuracy" and adjusting again from real numbers.
+// PHASE was Math.PI/2, which put the sweep's t=0 position at (0.5, 0.88) —
+// the very bottom of the safe band. Combined with the stationary lead-in
+// (which holds the dot at dead center), that made the dot TELEPORT 0.38 of
+// the screen height downward the instant the sweep began, guaranteeing a
+// catch-up saccade at exactly the moment sampling started. Reported from
+// real use ("have the dot start moving from the center") and confirmed
+// numerically. PHASE = 0 makes both axes start at their sine zero-crossing,
+// i.e. exactly (CX, CY) — the sweep now begins from wherever the lead-in
+// left the eye, with no discontinuity. The 2:3 frequency ratio still traces
+// a proper Lissajous figure at zero phase offset, so interior coverage is
+// preserved.
+export const CX = 0.5, CY = 0.5, AX = 0.4, AY = 0.38, FX = 2, FY = 3, PHASE = 0;
+export const DEFAULT_DURATION_SEC = 12;
+// Ease the target up to full speed over the first RAMP_SEC rather than
+// starting at full velocity from a dead stop — also requested from real use
+// ("maybe move faster to the target speed after a second or two rampup for
+// the user to get comfortable"). Implemented as a TIME WARP inside
+// pursuitTarget rather than a separate display-only animation, so the fit's
+// own labels (which call the same function) stay exactly consistent with
+// what was actually on screen; a display/label mismatch here would
+// systematically mislabel every early sample.
+export const RAMP_SEC = 1.5;
+// Stationary hold at screen center before the sweep starts, so the user can
+// read the instructions and get their eyes settled on the target before it
+// moves — requested directly from real use ("maybe it should just start in
+// the center for 5s so i can read the text and get my eyes centered before
+// it starts going around"). Samples captured during this hold are discarded
+// rather than fitted: the eye is genuinely at center the whole time, so
+// they'd be valid center-labeled data, but feeding a long stationary run
+// into a fit whose lag estimator works by cross-correlating *movement*
+// would swamp the signal it needs with a flat segment.
+export const DEFAULT_LEAD_IN_SEC = 3;
 export const DEFAULT_SEGMENTS = 10;
 // Candidate smooth-pursuit lags to search over (see module doc comment
 // above) — NOT tuned against real user sessions (no corpus of "real pursuit
@@ -78,8 +122,22 @@ export const DEFAULT_CANDIDATE_LAGS_SEC = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3];
 // Where the pursuit target sits at time tSec into a `durationSec`-long sweep
 // (screen fraction, same 0-1 space sx/sy already live in throughout this
 // app). Clamped outside [0, durationSec] rather than extrapolated.
-export function pursuitTarget(tSec, durationSec) {
-  const t = Math.max(0, Math.min(durationSec, tSec));
+// Maps real elapsed time to "trajectory time," easing speed up from 0 to
+// full over RAMP_SEC (speed profile s(t) = min(1, t/RAMP_SEC); this is its
+// integral). Rescaled by `k` so a full durationSec of real time still
+// completes exactly one full sweep — without that, the ramp would eat
+// RAMP_SEC/2 of trajectory and silently truncate the path's last arc,
+// losing the screen coverage that arc was there to provide.
+function warpTime(t, durationSec, rampSec) {
+  const ramp = Math.min(rampSec, durationSec);
+  if (ramp <= 0) return t;
+  const raw = t < ramp ? (t * t) / (2 * ramp) : ramp / 2 + (t - ramp);
+  const k = durationSec / (durationSec - ramp / 2);
+  return raw * k;
+}
+
+export function pursuitTarget(tSec, durationSec, { rampSec = RAMP_SEC } = {}) {
+  const t = warpTime(Math.max(0, Math.min(durationSec, tSec)), durationSec, rampSec);
   const x = CX + AX * Math.sin((2 * Math.PI * FX * t) / durationSec);
   const y = CY + AY * Math.sin((2 * Math.PI * FY * t) / durationSec + PHASE);
   return { x, y };

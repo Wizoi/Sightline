@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   fitCalibration, applyX, applyY, calibMismatch,
-  looResiduals, gridSpacingThreshold, calibrationQuality,
-} from './calibrationModel.js';
+  looResiduals, gridSpacingThreshold, calibrationQuality, chooseEyeMode, projectEyeMode } from './calibrationModel.js';
 
 // The real 9-point grid used by runCalibration() in src/calibration.js.
 function grid9() {
@@ -196,5 +195,74 @@ describe('fitCalibration on many samples per dot (pointId grouping)', () => {
     const quality = calibrationQuality(rows);
     expect(quality.poor).toBe(false);
     expect(quality.residuals).toEqual([]);
+  });
+});
+
+describe('chooseEyeMode (ocular dominance / one eye tracking worse)', () => {
+  // Deterministic pseudo-noise so this test can't flake.
+  function noise(i) { const x = Math.sin(i * 12.9898) * 43758.5453; return (x - Math.floor(x)) - 0.5; }
+
+  // Synthetic user whose LEFT eye tracks cleanly while the RIGHT eye is
+  // NOISY. Note a constant inter-eye offset is deliberately NOT used here:
+  // a pure translation is absorbed by the model's own intercept, so it
+  // costs nothing and correctly shouldn't change the choice. What actually
+  // degrades a fit is one eye carrying more independent noise, which
+  // averaging then mixes into the good eye's signal.
+  function makePoints({ rightNoise = 0 } = {}) {
+    const pts = [];
+    let pointId = 0, i = 0;
+    for (const sy of [0.12, 0.5, 0.88]) {
+      for (const sx of [0.1, 0.5, 0.9]) {
+        for (let k = 0; k < 6; k++) {
+          const rxL = (sx - 0.5) * 0.4, ryL = (sy - 0.5) * 0.4;
+          const rxR = rxL + rightNoise * noise(i++);
+          const ryR = ryL + rightNoise * noise(i++);
+          pts.push({
+            sx, sy, pointId, bH: 0, bV: 0,
+            rxL, ryL, rxR, ryR,
+            rx: (rxL + rxR) / 2, ry: (ryL + ryR) / 2, // the blend, as captured
+          });
+        }
+        pointId++;
+      }
+    }
+    return pts;
+  }
+
+  it('picks "both" when the two eyes agree (no reason to discard half the signal)', () => {
+    const r = chooseEyeMode(makePoints({ rightNoise: 0 }));
+    expect(r.mode).toBe('both');
+    expect(r.hasPerEye).toBe(true);
+  });
+
+  it('picks the clean eye when the other one is markedly noisier', () => {
+    const r = chooseEyeMode(makePoints({ rightNoise: 0.5 }));
+    expect(r.mode).toBe('left');
+    expect(r.errors.left).toBeLessThan(r.errors.both);
+    expect(r.errors.left).toBeLessThan(r.errors.right);
+  });
+
+  it('a constant inter-eye offset alone does NOT change the choice -- the model absorbs a pure translation, so discarding an eye for it would lose signal for nothing', () => {
+    const pts = makePoints({ rightNoise: 0 }).map((p) => ({
+      ...p, rxR: p.rxL + 0.25, ryR: p.ryL + 0.25, rx: p.rxL + 0.125, ry: p.ryL + 0.125,
+    }));
+    expect(chooseEyeMode(pts).mode).toBe('both');
+  });
+
+  it('falls back to "both" when rows carry no per-eye data (older saved calibrations, synthetic fixtures)', () => {
+    // eslint-disable-next-line no-unused-vars -- destructuring to DROP the per-eye fields
+    const plain = makePoints().map(({ rxL, ryL, rxR, ryR, ...rest }) => rest);
+    const r = chooseEyeMode(plain);
+    expect(r.mode).toBe('both');
+    expect(r.hasPerEye).toBe(false);
+  });
+
+  it('projectEyeMode rewrites rx/ry from the requested eye and leaves rows without per-eye data untouched', () => {
+    const [p] = makePoints({ rightNoise: 0.5 });
+    expect(projectEyeMode([p], 'right')[0].rx).toBeCloseTo(p.rxR, 9);
+    expect(projectEyeMode([p], 'left')[0].rx).toBeCloseTo(p.rxL, 9);
+    expect(projectEyeMode([p], 'both')[0].rx).toBeCloseTo(p.rx, 9);
+    const plain = { sx: 0.5, sy: 0.5, rx: 0.1, ry: 0.2, bH: 0, bV: 0 };
+    expect(projectEyeMode([plain], 'left')[0]).toEqual(plain);
   });
 });

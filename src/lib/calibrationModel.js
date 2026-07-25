@@ -193,3 +193,69 @@ export function calibMismatch(oldFp, newFp) {
   if (oldFp.dpr && newFp.dpr && Math.abs(newFp.dpr - oldFp.dpr) > 0.01) r.push('display zoom changed');
   return r;
 }
+
+// Which eye's signal the fitted model should use. The two eyes are not
+// always equally good predictors of gaze: ocular dominance is common, and a
+// small misalignment between the eyes (a phoria) can make one eye's apparent
+// iris offset a systematically worse fit to where the person is actually
+// looking. Blindly averaging then mixes a good signal into a worse one.
+// Rather than assume, this MEASURES it against the user's own calibration
+// targets — the one moment the app has ground truth for where they were
+// genuinely looking.
+export const EYE_MODES = ['both', 'left', 'right'];
+
+// Rewrites each calibration row's rx/ry to come from the requested eye.
+// Rows that don't carry per-eye values (older saved calibrations, synthetic
+// test fixtures) are returned untouched, which makes 'both' the safe
+// fallback everywhere.
+export function projectEyeMode(calibPoints, mode) {
+  if (mode === 'left') {
+    return calibPoints.map((p) => (p.rxL == null ? p : { ...p, rx: p.rxL, ry: p.ryL }));
+  }
+  if (mode === 'right') {
+    return calibPoints.map((p) => (p.rxR == null ? p : { ...p, rx: p.rxR, ry: p.ryR }));
+  }
+  return calibPoints;
+}
+
+// Mean leave-one-point-out error for a candidate eye mode — the same
+// genuine generalization measure the existing quality check uses, not the
+// fit's own training residual (which a 7-parameter model can drive near
+// zero regardless of whether it generalizes).
+function looMeanError(calibPoints, ridgeLambda) {
+  const res = looResiduals(calibPoints, ridgeLambda);
+  if (!res.length) return Infinity;
+  return mean(res.map((r) => r.dist));
+}
+
+// Picks whichever of both/left/right actually predicts this user's own
+// calibration targets best, and reports all three so the choice is
+// inspectable rather than opaque. Returns 'both' unchanged when per-eye
+// data isn't present at all.
+//
+// `margin` is deliberately LARGE (a single eye must beat the blend by 20%
+// relative, not just edge it out). Two asymmetric risks drove this, after a
+// real hands-on session:
+//   - Wrongly switching to one eye throws away half the available signal
+//     and loses the independent-noise averaging the blend provides.
+//   - Wrongly staying on 'both' costs only the modest gain a genuinely
+//     better eye would have given.
+// The first is clearly worse. And the measurement this decision rests on is
+// noisy in practice: back-to-back calibrations in identical conditions were
+// observed producing accuracy-test results 36 points apart, far exceeding
+// the few-percent differences a small margin would act on. A tight margin
+// would then flip the chosen eye essentially at random between sessions —
+// itself a source of the inconsistency it's meant to fix. 20% only fires on
+// a difference large enough to be real under that noise. Lower it only with
+// evidence from a quieter measurement setup, not by intuition.
+export function chooseEyeMode(calibPoints, ridgeLambda = 0.05, { margin = 0.20 } = {}) {
+  const hasPerEye = calibPoints.some((p) => p.rxL != null && p.rxR != null);
+  const errors = { both: looMeanError(calibPoints, ridgeLambda) };
+  if (!hasPerEye) return { mode: 'both', errors, hasPerEye: false };
+  errors.left = looMeanError(projectEyeMode(calibPoints, 'left'), ridgeLambda);
+  errors.right = looMeanError(projectEyeMode(calibPoints, 'right'), ridgeLambda);
+  let mode = 'both';
+  const best = errors.left < errors.right ? 'left' : 'right';
+  if (errors[best] < errors.both * (1 - margin)) mode = best;
+  return { mode, errors, hasPerEye: true };
+}

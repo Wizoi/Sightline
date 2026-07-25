@@ -6,6 +6,7 @@ import { repositionAutoScroll } from './autoScrollController.js';
 import { setCameraZoom } from './camera.js';
 import { TRACKING_TYPES, getActiveTracking, setTrackingType, canFollow } from './tracking/index.js';
 import { resetWinkTrackingState } from './tracking/winkTracking.js';
+import { resetIrisTrackingState } from './tracking/irisTracking.js';
 import { cancelPursuitCalibration } from './calibration.js';
 
 const SETTINGS_KEY = 'eyepagescroller.settings';
@@ -323,6 +324,7 @@ export function initSettingsUI() {
     $('calib').style.display = 'none';
     cancelPursuitCalibration();
     resetWinkTrackingState();
+    resetIrisTrackingState();
     $('calibBtn').textContent = '🎯 Calibrate';
     setStatus('s-warn', getActiveTracking().needsCalibration ? 'tracking type changed — recalibrate' : 'tracking type changed — ready to follow');
     toast('Switched to ' + getActiveTracking().label);

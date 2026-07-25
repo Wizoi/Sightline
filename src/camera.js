@@ -61,6 +61,9 @@ export async function startCamera() {
     const saved = getActiveTracking().needsCalibration ? loadCalibration() : null;
     if (saved && saved.model === calibModelId() && saved.coefX && saved.coefY && saved.gnorm) {
       state.coefX = saved.coefX; state.coefY = saved.coefY; state.gnorm = saved.gnorm;
+      // Older saved calibrations predate per-eye selection -> 'both', which
+      // is exactly the behavior they were fitted under.
+      state.eyeMode = saved.eyeMode || 'both';
       state.calibFp = saved.fp || null; state.calibrated = true;
       $('calibBtn').textContent = '🎯 Recalibrate';
       $('testBtn').disabled = false;

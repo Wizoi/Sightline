@@ -220,3 +220,24 @@ port to continuous data unchanged) belongs with this persona's other LOO/validat
   silently regress into forgotten technical debt. Full suite: `npm test` — 351 passed (was 338;
   +13 new, 0 regressions).
 
+
+**Per-eye model selection (`chooseEyeMode`, 2026-07-25)** — prompted by a real user asking whether
+one of their eyes might be throwing the fit off. The two eyes are not always equally good
+predictors: ocular dominance is common, and averaging then blends a good signal into a worse one.
+Calibration is the one moment the app has ground truth for where the user was genuinely looking, so
+this is decidable from evidence: fit three candidates (left-only, right-only, both-averaged) and
+compare them by **leave-one-point-out** error, reusing the existing LOO machinery — not training
+error, which a 7-parameter model can drive near zero regardless.
+
+Two findings worth keeping:
+- **A constant offset between the eyes is harmless and must NOT trigger a switch.** A pure
+  translation is absorbed entirely by the model's own intercept. This was discovered by writing a
+  test that asserted the opposite and watching it fail — the test was wrong, not the code. What
+  actually degrades a fit is one eye carrying more *noise*. The test now asserts both directions
+  explicitly, so the distinction can't be lost later.
+- **The switch margin is deliberately large (20% relative), and the risk is asymmetric.** Wrongly
+  switching discards half the signal and loses the blend's independent-noise averaging; wrongly
+  staying on `both` only forgoes a modest gain. Combined with the measurement noise documented in
+  persona 1 (36-point swings between identical runs), a tight margin would flip the chosen eye
+  essentially at random between sessions — becoming a *source* of the inconsistency it exists to
+  fix. Lower it only with evidence from a quieter measurement setup, never by intuition.

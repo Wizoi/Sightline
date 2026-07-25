@@ -237,3 +237,13 @@ kbd { background:#21262d; border:1px solid #30363d; border-bottom-width:2px; bor
 #tempoHud:empty, #tempoHud:has(#tempoText:empty) { display: none; }
 
 #sectionsBox { margin-top: 10px; padding-top: 10px; border-top: 1px solid #30363d; }
+
+/* Cancel affordance on the two modal calibration overlays. Both used to have
+   no exit at all short of completing them, which left one sitting open (and
+   hidden) behind whatever the user opened next — reported from real use. */
+.overlayCancel {
+  display: inline-block; margin-top: 12px; padding: 6px 14px;
+  background: #1a1f27; color: var(--ink); border: 1px solid #2c333d;
+  border-radius: 6px; font-size: 13px; cursor: pointer;
+}
+.overlayCancel:hover { background: #232a34; }

@@ -50,6 +50,12 @@ export const state = {
   coefX: null,
   coefY: null,
   gnorm: null,
+  // Which eye's signal the fitted model uses: 'both' (default), 'left' or
+  // 'right'. Chosen from measured held-out error at calibration time — see
+  // lib/calibrationModel.js's chooseEyeMode — because ocular dominance and
+  // small eye misalignments make the two eyes unequal predictors for some
+  // people, and averaging then blends a good signal with a worse one.
+  eyeMode: 'both',
   calibFp: null,
 
   biasX: 0,

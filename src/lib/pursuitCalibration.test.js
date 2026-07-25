@@ -205,3 +205,39 @@ describe('fitPursuitCalibration — end-to-end fit, and the naive-implementation
     expect(fitPursuitCalibration([{ tSec: 0, rx: 0, ry: 0, bH: 0, bV: 0 }])).toBeNull();
   });
 });
+
+describe('pursuitTarget: center start + speed ramp (real-user findings, 2026-07-25)', () => {
+  const D = DEFAULT_DURATION_SEC;
+
+  it('starts the sweep at dead center, so it continues from where the stationary lead-in left the eye', () => {
+    const p = pursuitTarget(0, D);
+    expect(p.x).toBeCloseTo(CX, 6);
+    expect(p.y).toBeCloseTo(CY, 6);
+  });
+
+  it('regression: does NOT teleport to the bottom of the safe band at t=0 (the pre-fix PHASE=PI/2 behavior jumped 0.38 of screen height, forcing a catch-up saccade exactly when sampling began)', () => {
+    expect(Math.abs(pursuitTarget(0, D).y - CY)).toBeLessThan(0.01);
+  });
+
+  it('ramps speed up: the target moves slower early in the sweep than at full speed later', () => {
+    const speedAt = (t) => {
+      const a = pursuitTarget(t, D), b = pursuitTarget(t + 0.05, D);
+      return Math.hypot(b.x - a.x, b.y - a.y) / 0.05;
+    };
+    expect(speedAt(0.2)).toBeLessThan(speedAt(1.5));
+    expect(speedAt(1.5)).toBeLessThan(speedAt(6));
+  });
+
+  it('still completes a full sweep and covers the whole safe band despite the ramp eating trajectory time', () => {
+    let minX = 1, maxX = 0, minY = 1, maxY = 0;
+    for (let t = 0; t <= D; t += 0.01) {
+      const q = pursuitTarget(t, D);
+      minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
+      minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
+    }
+    expect(minX).toBeCloseTo(CX - AX, 2);
+    expect(maxX).toBeCloseTo(CX + AX, 2);
+    expect(minY).toBeCloseTo(CY - AY, 2);
+    expect(maxY).toBeCloseTo(CY + AY, 2);
+  });
+});

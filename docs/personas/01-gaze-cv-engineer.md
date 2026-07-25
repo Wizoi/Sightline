@@ -253,3 +253,44 @@ wiring below is this one's).**
   app's own "Check accuracy" test with real users, before ever considering it for anything beyond
   "(experimental)".
 
+
+**First real hands-on webcam session (2026-07-25) — three genuine defects found, and a hard lesson
+about the measurement itself.** Everything before this was synthetic-only; a human at a real
+webcam found things no unit test could.
+
+- **A real bug shipped that same day, in backlog item A4's fixed blink threshold.** A4 switched
+  iris tracking's blink gate to MediaPipe's `eyeBlink` blendshape with a fixed `> 0.3` cut. That
+  cut cannot distinguish *eye closing* from *eye looking down* — both narrow the aperture. The
+  bottom-row calibration dots (y=0.88) repeatedly failed to capture, and the user could make them
+  work instantly by deliberately widening their eyes, which is direct causal confirmation. The
+  gate was `return null`-ing before the calibration sample was pushed, so it silently discarded
+  exactly the samples for the lowest targets — both a capture failure and a systematic downward
+  bias in whatever survived. **Fixed** with a gate relative to a slowly-adapting baseline of the
+  user's own recent closure (blinks are large *fast* transients that clear the rise margin; a held
+  downward gaze is a smaller sustained elevation the baseline absorbs in ~0.4s), plus an absolute
+  ceiling. The baseline deliberately updates on rejected frames too — otherwise a downward look is
+  rejected on frame one and never gets to teach the baseline it's the new normal, which is the
+  original bug. **Generalizable lesson: any fixed threshold on an eye-closure signal is really a
+  threshold on eyelid aperture, and vertical gaze moves the eyelid. Prefer relative-to-baseline.**
+- **The pursuit trajectory teleported.** After the stationary lead-in holds the dot at center, the
+  sweep's own t=0 was at (0.5, 0.88) — the very bottom — so the dot jumped 0.38 of screen height
+  the instant sampling began, guaranteeing a catch-up saccade exactly when it mattered. Fixed by
+  setting PHASE=0 so the sweep starts where the lead-in left the eye. Found by a user saying "have
+  the dot start moving from the center," then confirmed numerically.
+- **Pursuit was moving far too fast** (~900px/s peak; smooth pursuit degrades into catch-up
+  saccades well below that). Slowing it recovered ~8 points of measured accuracy on its own.
+- **Ocular dominance is now measured, not assumed** — see the Applied Math persona for
+  `chooseEyeMode`. Prompted by the user asking whether one eye might be stronger.
+
+**The measurement lesson, which matters more than any of the above:** back-to-back 9-dot
+calibrations under *identical* code and *identical* room brightness produced accuracy-test results
+**36 points apart** (55% then 91% "lands on the right line"). The differences being chased all
+session were 5-10 points. **The noise was ~4x the signal, which means most single-run A/B
+comparisons made during that session were not measuring what they appeared to.** Two confounds were
+also in play and under-weighted at the time: room brightness drifted from ~140-150 down to
+~117-127 across the session, and the accuracy test was itself reporting "your face is small in
+frame" (fewer pixels on the iris is upstream of every algorithm here). **Before trusting any future
+gaze A/B: fix the setup first (light, distance), then take medians of 3-4 runs, never single runs.**
+Real-world target settled at ~75-80% "lands on the right line" as good enough for this app, since
+the reading band's height, the turn-delay, Snap mode's quantization, and the pedal/spacebar
+fallback all absorb residual gaze error.

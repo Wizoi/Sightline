@@ -3,7 +3,10 @@ import { state } from './appState.js';
 import { $, toast, setStatus, showRecalBanner, hideRecalBanner, applyBand } from './ui.js';
 import { loadPdf, renderAll } from './pdf.js';
 import { startCamera } from './camera.js';
-import { runCalibration, runPursuitCalibration, recenter, currentFingerprint } from './calibration.js';
+import {
+  runCalibration, runPursuitCalibration, cancelCalibration, cancelPursuitCalibration,
+  recenter, currentFingerprint,
+} from './calibration.js';
 import { calibMismatch } from './lib/calibrationModel.js';
 import { runAccuracyTest, beginAccuracySequence } from './accuracyTest.js';
 import { runWinkCalibration, beginWinkCalibrationSequence } from './winkCalibrate.js';
@@ -31,6 +34,8 @@ $('file').onchange = (e) => {
 $('camBtn').onclick = startCamera;
 $('calibBtn').onclick = runCalibration;
 $('pursuitCalibBtn').onclick = runPursuitCalibration;
+$('calibCancel').onclick = cancelCalibration;
+$('pursuitCancel').onclick = cancelPursuitCalibration;
 $('runBtn').onclick = () => {
   const turningOn = !state.following;
   // Eye/wink tracking and time-based Auto-scroll are alternatives, not
@@ -87,6 +92,10 @@ $('minBtn').onclick = toggleMin;
  * ---------------------------------------------------------------------- */
 window.addEventListener('keydown', (e) => {
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
+  // Escape backs out of either calibration overlay. Both are modal and
+  // previously had no exit at all short of completing them, which left one
+  // sitting open (and covered) behind whatever the user opened next.
+  if (e.code === 'Escape') { cancelCalibration(); cancelPursuitCalibration(); return; }
   if (e.code === 'Space') { e.preventDefault(); $('runBtn').click(); }
   else if (e.code === 'ArrowDown') window.scrollBy(0, 60);
   else if (e.code === 'ArrowUp') window.scrollBy(0, -60);

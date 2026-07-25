@@ -1,8 +1,15 @@
 import { cfg, state } from './appState.js';
 import { $, calibEl, video, toast, setStatus, showRecalBanner, hideRecalBanner } from './ui.js';
 import { median } from './lib/mathUtils.js';
-import { fitCalibration, calibrationQuality, calibMismatch as calibMismatchPure } from './lib/calibrationModel.js';
-import { pursuitTarget, fitPursuitCalibration, DEFAULT_DURATION_SEC as PURSUIT_DURATION_SEC } from './lib/pursuitCalibration.js';
+import {
+  fitCalibration, calibrationQuality, chooseEyeMode, projectEyeMode,
+  calibMismatch as calibMismatchPure,
+} from './lib/calibrationModel.js';
+import {
+  pursuitTarget, fitPursuitCalibration, CX, CY,
+  DEFAULT_DURATION_SEC as PURSUIT_DURATION_SEC,
+  DEFAULT_LEAD_IN_SEC as PURSUIT_LEAD_IN_SEC,
+} from './lib/pursuitCalibration.js';
 import { canFollow } from './tracking/index.js';
 
 // A ~550ms capture window at a typical webcam framerate (~30fps) yields
@@ -30,6 +37,22 @@ export function calibModelId() {
 /* ---------------------------------------------------------------------- *
  *  Calibration — 9 points, one click each; fit ratio → screen mapping
  * ---------------------------------------------------------------------- */
+// Abandons an in-progress 9-dot calibration without applying anything. The
+// overlay used to have NO exit at all: once opened, the only way out was
+// clicking all nine dots, so an accidental/abandoned calibration left it
+// stuck open underneath whatever the user opened next — reported from real
+// use as "closing the accuracy result brought up the old calibrate screen"
+// (it had been sitting there open the whole time, just covered). Any
+// previously-saved calibration is left untouched, since this never got as
+// far as fitting a new one.
+export function cancelCalibration() {
+  if (calibEl.style.display === 'none') return;
+  calibEl.style.display = 'none';
+  calibEl.querySelectorAll('.cdot').forEach((n) => n.remove());
+  state.capturing = null;
+  state.calibPoints = [];
+}
+
 export function runCalibration() {
   if (!state.camReady) return;
   calibEl.style.display = 'block';
@@ -63,7 +86,10 @@ export function runCalibration() {
           // pointId is used (grouped ridge-lambda scaling, leave-one-POINT,
           // not leave-one-sample, -out).
           for (const a of subsampleEvenly(s, MAX_SAMPLES_PER_POINT)) {
-            state.calibPoints.push({ sx: gx, sy: gy, rx: a.rx, ry: a.ry, bH: a.bH || 0, bV: a.bV || 0, pointId });
+            state.calibPoints.push({
+              sx: gx, sy: gy, rx: a.rx, ry: a.ry, bH: a.bH || 0, bV: a.bV || 0, pointId,
+              rxL: a.rxL, ryL: a.ryL, rxR: a.rxR, ryR: a.ryR,
+            });
           }
           d.classList.add('done'); d.style.pointerEvents = 'none';
           if (--remaining === 0) finishCalibration();
@@ -98,15 +124,39 @@ function applyFittedModel(gnorm, coefX, coefY, { poor, poorReasons } = {}) {
 }
 
 function finishCalibration() {
-  const { gnorm, coefX, coefY } = fitCalibration(state.calibPoints);
   calibEl.style.display = 'none';
+  // Measure whether one eye alone predicts this user's own targets better
+  // than the two averaged (ocular dominance / eye misalignment — see
+  // chooseEyeMode). Calibration is the one moment there's ground truth for
+  // where they were genuinely looking, so it's the only place this can be
+  // decided from evidence rather than assumption.
+  const points = applyChosenEyeMode(state.calibPoints);
+  const { gnorm, coefX, coefY } = fitCalibration(points);
 
-  // Free-with-9-points sanity check: leave-one-out residuals catch a poor
-  // calibration (bad point placement, camera hiccup mid-session) directly,
-  // rather than only reacting to a later camera/window fingerprint change
-  // (calibMismatch, below).
-  const quality = calibrationQuality(state.calibPoints);
+  // Free sanity check: leave-one-out residuals catch a poor calibration (bad
+  // point placement, camera hiccup mid-session) directly, rather than only
+  // reacting to a later camera/window fingerprint change (calibMismatch).
+  const quality = calibrationQuality(points);
   applyFittedModel(gnorm, coefX, coefY, { poor: quality.poor });
+}
+
+// Runs the eye-mode selection, records the winner on `state` (so
+// irisTracking.js projects live frames the same way at runtime, and
+// saveCalibration persists it), and returns the projected points to fit.
+// Reports all three candidates so the choice is inspectable — a user
+// wondering "is one of my eyes throwing this off?" gets a real number
+// rather than a shrug.
+function applyChosenEyeMode(calibPoints) {
+  const choice = chooseEyeMode(calibPoints);
+  state.eyeMode = choice.mode;
+  const e = choice.errors;
+  const pct = (v) => (v == null || !isFinite(v) ? 'n/a' : (v * 100).toFixed(1) + '%');
+  console.log('[calib] eye mode: %s (held-out error — both %s, left %s, right %s)',
+    choice.mode, pct(e.both), pct(e.left), pct(e.right));
+  if (choice.mode !== 'both') {
+    toast(`Using your ${choice.mode} eye — it tracked more accurately`);
+  }
+  return projectEyeMode(calibPoints, choice.mode);
 }
 
 /* ---------------------------------------------------------------------- *
@@ -140,7 +190,17 @@ export function runPursuitCalibration() {
 
   function step(now) {
     if (!pursuiting) return; // cancelled mid-flow (see cancelPursuitCalibration)
-    const tSec = (now - t0) / 1000;
+    const elapsed = (now - t0) / 1000;
+    // Stationary lead-in: hold the dot dead center so the user can read the
+    // instructions and settle their eyes on it before it starts moving (see
+    // DEFAULT_LEAD_IN_SEC). The sweep's own clock starts only after this.
+    if (elapsed < PURSUIT_LEAD_IN_SEC) {
+      dot.style.left = (CX * 100) + 'vw';
+      dot.style.top = (CY * 100) + 'vh';
+      requestAnimationFrame(step);
+      return;
+    }
+    const tSec = elapsed - PURSUIT_LEAD_IN_SEC;
     if (tSec >= PURSUIT_DURATION_SEC) { finish(); return; }
     const { x, y } = pursuitTarget(tSec, PURSUIT_DURATION_SEC);
     dot.style.left = (x * 100) + 'vw';
@@ -157,15 +217,45 @@ export function runPursuitCalibration() {
     // performance.now()) specifically so this flow can recover each sample's
     // position along the sweep — relative to this sweep's own t0, not
     // wall-clock time.
+    // Sample time is measured from the START OF THE SWEEP, not from t0 —
+    // the stationary lead-in above is offset out here, and its own samples
+    // dropped (tSec < 0), so the fit and its lag estimator only ever see
+    // the moving portion. See DEFAULT_LEAD_IN_SEC for why they're discarded
+    // rather than kept as center-labeled data.
     const rel = samples
       .filter((s) => typeof s.t === 'number')
-      .map((s) => ({ tSec: (s.t - t0) / 1000, rx: s.rx, ry: s.ry, bH: s.bH || 0, bV: s.bV || 0 }));
+      .map((s) => ({
+        tSec: (s.t - t0) / 1000 - PURSUIT_LEAD_IN_SEC, rx: s.rx, ry: s.ry,
+        bH: s.bH || 0, bV: s.bV || 0, rxL: s.rxL, ryL: s.ryL, rxR: s.rxR, ryR: s.ryR,
+      }))
+      .filter((s) => s.tSec >= 0);
     const result = fitPursuitCalibration(rel, PURSUIT_DURATION_SEC);
     if (!result) {
       toast('Pursuit calibration failed — try again, or use the 9-point Calibrate instead');
       return;
     }
-    state.calibPoints = result.calibPoints;
+    // Same eye-mode selection the 9-dot flow does (see applyChosenEyeMode):
+    // pursuit produces the same shaped calibPoints, so it benefits identically.
+    const pursuitPoints = applyChosenEyeMode(result.calibPoints);
+    state.calibPoints = pursuitPoints;
+    const refit = fitCalibration(pursuitPoints);
+    result.gnorm = refit.gnorm; result.coefX = refit.coefX; result.coefY = refit.coefY;
+    // Diagnostic readout (console only, not a user-facing surface). Real
+    // testing showed pursuit accuracy swinging 12 points between two
+    // back-to-back runs on identical code and identical room brightness
+    // (85% then 73% "lands on the right line") — a run-to-run consistency
+    // problem, not a systematically-worse fit. These are the quantities
+    // most likely to differ between a good and a bad run, and none of them
+    // were observable before: the estimated smooth-pursuit lag (chosen from
+    // a small discrete candidate set, so a neighbouring pick materially
+    // relabels every sample), how strongly that choice actually won
+    // (a weak/ambiguous correlation peak means the lag is near a coin flip),
+    // and how much data the fit actually got. Diagnose before tuning
+    // further — see the OMR persona's own "dump the real data first"
+    // precedent for why this comes before another threshold guess.
+    console.log('[pursuit] lag=%ss corr=%s rawSamples=%d fittedPoints=%d',
+      result.lagSec.toFixed(3), (result.lagCorrelation ?? 0).toFixed(4),
+      rel.length, result.calibPoints.length);
     // Deliberately always `poor: false` here — NOT wired to
     // result.quality.poor. See lib/pursuitCalibration.js's pursuitQuality
     // doc comment: its leave-one-out check was found, in this session's own
@@ -196,7 +286,7 @@ export function currentFingerprint() {
 export function saveCalibration() {
   try {
     localStorage.setItem(CALIB_KEY, JSON.stringify({
-      model: calibModelId(), coefX: state.coefX, coefY: state.coefY, gnorm: state.gnorm, fp: state.calibFp, ts: Date.now(),
+      model: calibModelId(), coefX: state.coefX, coefY: state.coefY, gnorm: state.gnorm, fp: state.calibFp, eyeMode: state.eyeMode, ts: Date.now(),
     }));
   } catch (e) { /* storage may be unavailable (private browsing, quota) — calibration just won't persist */ }
 }

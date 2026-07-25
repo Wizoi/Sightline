@@ -77,13 +77,32 @@ export function eyeConfidence(left, right) {
 // iris ratios. Plus eye openness (for blink gating). `weights` (from
 // eyeConfidence, above) lets a caller down-weight whichever eye currently
 // looks less trustworthy instead of always splitting 50/50.
+// Also returns each eye's OWN unblended ratios (rxL/ryL, rxR/ryR) alongside
+// the blended rx/ry. The blend is still the default signal, but the two eyes
+// are not always equally good predictors of where a person is actually
+// looking: ocular dominance is common, and a small misalignment between the
+// eyes (a phoria) makes one eye's apparent iris offset a systematically
+// worse fit to the true gaze target than the other's. Averaging then mixes
+// a good signal into a worse one, and no amount of downstream smoothing
+// recovers that. Carrying the per-eye values through lets the calibration
+// fit MEASURE which eye (or the blend) actually predicts the user's own
+// clicked targets best, rather than assuming the average is optimal — see
+// lib/calibrationModel.js's chooseEyeMode.
+//
+// Note these are distinct from the `weights` argument, which handles a
+// different problem: momentary OCCLUSION (glare, a head turn) making one
+// eye untrustworthy right now. That's per-frame and transient; eye dominance
+// is a stable property of the person.
 export function eyeRatios(lm, usePose, w, h, weights = { left: 1, right: 1 }) {
   const open = (eyeOpen(lm, 159, 145, 33, 133) + eyeOpen(lm, 386, 374, 263, 362)) / 2;
   const wl = weights.left ?? 1, wr = weights.right ?? 1;
   if (usePose) {
     const B = headBasis(lm, w, h);
     const L = eyeGaze(lm, 468, 33, 133, B, w, h), R = eyeGaze(lm, 473, 263, 362, B, w, h);
-    return { rx: wavg(L.yaw, R.yaw, wl, wr), ry: wavg(L.pitch, R.pitch, wl, wr), open };
+    return {
+      rx: wavg(L.yaw, R.yaw, wl, wr), ry: wavg(L.pitch, R.pitch, wl, wr), open,
+      rxL: L.yaw, ryL: L.pitch, rxR: R.yaw, ryR: R.pitch,
+    };
   }
   const one = (iris, outer, inner) => {
     const cx = (lm[outer].x + lm[inner].x) / 2, cy = (lm[outer].y + lm[inner].y) / 2;
@@ -91,7 +110,10 @@ export function eyeRatios(lm, usePose, w, h, weights = { left: 1, right: 1 }) {
     return { rx: (lm[iris].x - cx) / eyeW, ry: (lm[iris].y - cy) / eyeW };
   };
   const L = one(468, 33, 133), R = one(473, 263, 362);
-  return { rx: wavg(L.rx, R.rx, wl, wr), ry: wavg(L.ry, R.ry, wl, wr), open };
+  return {
+    rx: wavg(L.rx, R.rx, wl, wr), ry: wavg(L.ry, R.ry, wl, wr), open,
+    rxL: L.rx, ryL: L.ry, rxR: R.rx, ryR: R.ry,
+  };
 }
 
 // Eye-look blendshape signals (pose-normalized by the model) — extra
