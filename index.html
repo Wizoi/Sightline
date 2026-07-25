@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-VOpFQtEl.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-DF9hwOvE.css">
+  <script type="module" crossorigin src="./assets/index-Bc85_3qq.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-6veAMoqj.css">
 </head>
 <body>
 
@@ -189,11 +189,15 @@
 </div>
 
 <div id="calib">
-  <div class="msg">Look at each red dot and click it <b>once</b>, holding your gaze until it turns green.<small>Do this in your real playing position. The overlay closes itself when all nine are green.</small></div>
+  <div class="msg">Look at each red dot and click it <b>once</b>, holding your gaze until it turns green.<small>Do this in your real playing position. The overlay closes itself when all nine are green.</small>
+    <button id="calibCancel" class="overlayCancel">Cancel (Esc)</button>
+  </div>
 </div>
 
 <div id="pursuitCalib">
-  <div class="msg">Follow the moving dot smoothly with your eyes — don't look away — for about 10 seconds.<small>Experimental alternative to the 9-point Calibrate above. Do this in your real playing position.</small></div>
+  <div class="msg">Look at the dot and follow it smoothly with your eyes — don't look away.<small>It holds still for a few seconds first, then moves for about 12 seconds. Experimental alternative to the 9-point Calibrate. Do this in your real playing position.</small>
+    <button id="pursuitCancel" class="overlayCancel">Cancel (Esc)</button>
+  </div>
   <div id="pdot"></div>
 </div>
 
