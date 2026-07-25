@@ -57,7 +57,7 @@ them with the tabs at the top of the panel. This quick start covers eye/wink tra
 
 1. **Load your music** — click *Load PDF* and choose any PDF of your score or part.
 2. **Start the camera** — click *Start camera* and allow access when your browser asks.
-3. **Calibrate** — nine dots appear; look at each one and click it, holding your gaze until it turns green. Do this sitting the way you'll actually play.
+3. **Calibrate** — a dot appears in the middle, then moves slowly around the screen for about twenty seconds, pausing a few times. Follow it with your eyes and don't look away. Do this sitting the way you'll actually play. (Wink tracking needs no calibration — skip to the next step.)
 4. **Follow eyes** — click it (or press <kbd>Space</kbd>) and the page starts following you.
 5. **Play!** Read normally; when you reach the end of a line or look at the next system, the page advances.
 
@@ -76,7 +76,7 @@ only in your browser).
 
 **Tracking type** (in the **Eye/Wink** tab) picks how Sightline reads your intent to turn the page:
 - **Wink tracking** (default) — no calibration needed to get started. Wink your **left** eye to scroll up, your **right** eye to scroll down; a *blink* (both eyes together) is ignored, only a one-eyed wink counts. **Wink scroll strength** controls how firm a push each wink gives. If winks are missed or blinks trigger by mistake, **Calibrate wink sensitivity** measures your own resting and winking eyes for a few seconds and sets personal thresholds instead of the one-size-fits-all default.
-- **Iris tracking** — watches where your eyes point, via the 9-point calibration described above. There's also an experimental **Pursuit calibration** alternative: instead of clicking nine fixed dots, you follow a single moving dot with your eyes for about ten seconds. It's quicker and less fiddly, and it feeds the same saved calibration — try it if the nine-dot version is tedious, and just re-run the normal one if it works better for you.
+- **Iris tracking** — watches exactly where your eyes point, for the most precise page-following. Calibrating takes about twenty seconds: a dot sits still in the middle for a moment, then moves slowly around the screen, pausing a few times along the way. Just follow it with your eyes and don't look away. If that doesn't work well for you, **Calibrate (9-dot fallback)** offers the older method instead — clicking nine fixed dots, one at a time. Either way the result is saved, so you only do it once.
 
 Switching tracking types is instant — pick whichever is more reliable for your face/lighting/glasses.
 
@@ -185,7 +185,7 @@ Running *Check accuracy* will tell you what's off.
 system and hold briefly. If your score has unusual spacing, turn on *Show detected systems* to
 see whether it grouped the staves correctly.
 
-**It feels inaccurate (Iris tracking).** Recalibrate slowly (hold your gaze on each dot), improve
+**It feels inaccurate (Iris tracking).** Recalibrate, keeping your eyes on the moving dot the whole way and resisting the urge to glance ahead of it; improve
 lighting, and keep *Head-pose comp* on so moving your head doesn't throw it off.
 
 **Wink tracking misses winks, or a blink triggers a page turn by mistake.** Run **Calibrate wink

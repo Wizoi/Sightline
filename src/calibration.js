@@ -161,9 +161,13 @@ function applyChosenEyeMode(calibPoints) {
 }
 
 /* ---------------------------------------------------------------------- *
- *  Smooth-pursuit calibration (experimental) — an ALTERNATIVE to the 9-dot
- *  flow above, not a replacement: the user follows one continuously-moving
- *  target for ~10s instead of clicking 9 fixed points. See
+ *  Smooth-pursuit calibration — the PRIMARY calibration flow (the 9-dot grid
+ *  above is kept as a fallback). The user follows one continuously-moving
+ *  target, which pauses briefly a few times along the way, instead of
+ *  clicking 9 fixed points. Promoted from "experimental alternative" after
+ *  real-use testing found it far easier to complete with accuracy
+ *  indistinguishable from the grid within that session's measurement noise
+ *  — see docs/personas/01-gaze-cv-engineer.md. See
  *  lib/pursuitCalibration.js for the trajectory/lag-correction math and its
  *  own honestly-documented limitations (in particular: this flow's own
  *  quality check is NOT wired to the recal banner — see the comment below).

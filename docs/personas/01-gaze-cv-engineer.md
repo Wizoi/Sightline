@@ -294,3 +294,47 @@ gaze A/B: fix the setup first (light, distance), then take medians of 3-4 runs, 
 Real-world target settled at ~75-80% "lands on the right line" as good enough for this app, since
 the reading band's height, the turn-delay, Snap mode's quantization, and the pedal/spacebar
 fallback all absorb residual gaze error.
+
+**Smooth pursuit promoted to the PRIMARY calibration (2026-07-25), with the 9-dot grid kept as a
+labelled fallback.** Driven by real use: pursuit was reported as dramatically easier to complete,
+and its accuracy became indistinguishable from the grid within the same session's (large)
+measurement noise. Every entry point moved together — the Calibrate button, the accuracy result's
+"Recalibrate", the recal banner, and the `C` hotkey. **The 9-dot flow was deliberately NOT deleted**:
+it is the proven path, someone whose eyes don't pursue smoothly still needs it, and removing it
+would strand saved calibrations with no recovery route. The element id `pursuitCalibBtn` was
+renamed `calibFallbackBtn` in the same change — after the swap that id would have named the button
+running the *9-dot* flow, exactly the kind of quietly-wrong name that misleads a later reader.
+
+Three refinements landed the same day, each from a specific real-use observation, each with a
+mechanism rather than a tuning guess behind it:
+- **Dwell stops** (4 × 0.6s) partway through the sweep. During a *fixation* there is no
+  smooth-pursuit lag to estimate at all, so those samples are 9-dot quality and anchor the fit at
+  known positions, while the moving segments still give coverage a 9-point grid can't. They are
+  also inherently lag-INSENSITIVE: shifting a sample's timestamp while the target is stationary
+  barely changes where the target was, so they stay correctly labeled even when the lag estimate
+  is off — which is the failure mode that made pursuit inconsistent run to run.
+- **Easing into and out of each dwell.** Reported as "seems to be abrupt," and it was a data
+  problem as much as a comfort one: pursuit carries momentum, so a target that stops dead is
+  overshot and one that restarts at full speed is caught up to with a saccade — corrupting exactly
+  the samples the dwells exist to make clean. Velocity now ramps linearly to zero and back;
+  measured max frame-to-frame velocity step fell from 1.0 to 0.029.
+- **Auto-set "Eye-tracking smoothing" from measured noise.** That slider never had a principled
+  value — it shipped as something the user was expected to guess at. Calibration is precisely when
+  this user's real per-frame jitter, on this camera in this light, is observable against a known
+  target. Estimated from the first difference of the fit residual (differencing cancels both the
+  target's motion and any slow bias), median-filtered so a blink can't dominate.
+  **A wrong turn worth recording:** the noise→slider mapping first derived its target from
+  `cfg.deadZoneFrac / 6` and returned minimum smoothing for every realistic input. The dead zone
+  defaults to 0.18 — eighteen percent of the screen — so even a sixth of it is an enormous
+  tolerance, and it is the wrong quantity regardless: the dead zone is what a *sustained* offset
+  must not cross and says nothing about per-frame jitter. Caught by printing the mapping across
+  realistic inputs rather than trusting the derivation. **Generalizable: when a formula is derived
+  from an existing constant, print its output across the real input range before shipping it —
+  a plausible-sounding derivation can still be anchored to the wrong quantity entirely.**
+
+Implementation note for anyone extending the trajectory: display, fit, and lag estimator must all
+agree on where the target was at a given instant. That is guaranteed by doing the elapsed →
+sweep-time conversion **once** (`sweepTimeFromElapsed`), deliberately kept separate from
+`pursuitTarget`, with everything downstream continuing to work in the sweep's own trajectory time.
+Dwells and the speed ramp both live in that conversion, so neither can desynchronise the labels
+from what was actually on screen.
