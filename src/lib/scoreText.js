@@ -8,10 +8,20 @@
 // notation software; not true of a scanned/photocopied page), but where it
 // applies, it's exact rather than a visual estimate.
 //
-// Deliberately does NOT read time-signature digits — those are drawn from
-// the music engraving's glyph font and have no extractable text value (see
-// lib/timeSigMatch.js for the separate, best-effort, shape-based approach
-// to that).
+// Time-signature digits: MOSTLY still handled by the separate, best-effort,
+// shape-based approach in lib/timeSigMatch.js / timeSigDetection.js, because
+// the music engraving's glyph font usually has no extractable text value.
+// But NOT always — a real-corpus spike (2026-07-24, see
+// docs/personas/omr/investigation-log.md) found that pdf.js's own
+// `_simpleFontToUnicode` fallback sometimes ALREADY resolves a time-signature
+// glyph to a literal ASCII digit in plain page.getTextContent() output, with
+// no special options and no extra call. This is NOT predictable by vendor —
+// two files from what looks like the same notation software can go either
+// way — so extractTimeSignatures() below is a per-file, per-system
+// opportunistic geometric check (a numerator stacked directly above a
+// denominator at nearly the same x), never assumed available, that the
+// caller (scoreAnalysis.js) tries FIRST and falls through cleanly from when
+// it finds nothing, keeping the pixel/OCR path as the necessary fallback.
 
 // Common tempo markings (Italian, as conventionally printed on scores).
 // Single words only for this first pass — multi-word markings like "Allegro
@@ -358,6 +368,98 @@ export function extractTempoMarks(pageItems, systemsOnPage, { pad = 24 } = {}) {
     if (!candidates.length) continue;
     const best = candidates.reduce((a, b) => (Math.abs(b.y - sys.yTop) < Math.abs(a.y - sys.yTop) ? b : a));
     results.push({ systemIndex: sys.index, bpm: best.bpm });
+  }
+  return results;
+}
+
+// Time-signature digits read straight off the text layer — see the header
+// comment above for why this is real but not universal. A time signature is
+// a numerator directly above a denominator at nearly the same x: that
+// vertical-stacking geometry, not "first digit found near the top of a
+// system," is what distinguishes it from any other stray digit near a
+// system's start (a measure number, a fingering, a rehearsal-mark numeral,
+// a repeat-ending bracket's "1."/"2."). xTolerance/yGapMin/yGapMax are the
+// observed real-file range (takefive.pdf, Peace_Sign Clarinet.pdf: same x
+// within ~1pt, y-gap 9-10pt) with margin either side for engraving variance
+// this small real sample can't fully characterize.
+const TIMESIG_DIGIT_RE = /^\d{1,2}$/;
+// A time signature's denominator is always a power of two in the vast
+// majority of real engraved music (the rare exceptions — additive meters
+// like 3+2+3/8 spelled with a non-power-of-two total, or an editorial "N"
+// denominator — aren't a plain stacked digit pair in the first place, so
+// they're out of scope for this geometric check regardless). Filtering to
+// this set is what actually rejects a coincidentally-aligned pair of
+// unrelated digits (e.g. two nearby fingering numbers) — confirmed
+// necessary, not just defensive, since nothing else about this check
+// distinguishes "real time signature" from "any two stacked digits."
+const PLAUSIBLE_DENOMINATORS = new Set([1, 2, 4, 8, 16, 32]);
+function isPlausibleTimeSigPair(beatsPerMeasure, noteValue) {
+  return beatsPerMeasure >= 1 && beatsPerMeasure <= 32 && PLAUSIBLE_DENOMINATORS.has(noteValue);
+}
+
+// Pure pairing logic over a small candidate item list — the caller restricts
+// `items` to one system's plausible region first (see extractTimeSignatures
+// below), so this only has to worry about picking the right pair among a
+// handful of candidates, not the whole page. Deliberately reads raw items
+// directly, NOT groupIntoRows' merged rows: joining rows would glue the
+// numerator and denominator (which sit on visually different "rows" despite
+// belonging to the same time signature) onto whatever else shares either
+// one's y, corrupting exactly the geometry this needs to see cleanly.
+// Exported standalone for direct unit testing against synthetic fixtures.
+export function findStackedDigitPair(items, { xTolerance = 3, yGapMin = 3, yGapMax = 22 } = {}) {
+  const digits = items.filter((it) => TIMESIG_DIGIT_RE.test(it.str.trim()));
+  let best = null;
+  for (const a of digits) {
+    for (const b of digits) {
+      if (a === b) continue;
+      const gap = a.y - b.y; // a above b -- PDF y grows upward, so the numerator (top) has the larger y
+      if (gap < yGapMin || gap > yGapMax) continue;
+      if (Math.abs(a.x - b.x) > xTolerance) continue;
+      const beatsPerMeasure = parseInt(a.str.trim(), 10);
+      const noteValue = parseInt(b.str.trim(), 10);
+      if (!isPlausibleTimeSigPair(beatsPerMeasure, noteValue)) continue;
+      // Prefer the leftmost, most tightly-stacked plausible pair: a real
+      // time signature sits right after the clef/key signature (the
+      // leftmost such pair), flush-stacked (the tightest gap) — any other
+      // coincidentally-aligned pair further right or more loosely spaced is
+      // less likely to be the real one.
+      if (!best || a.x < best.x || (a.x === best.x && gap < best.gap)) {
+        best = { beatsPerMeasure, noteValue, x: a.x, gap };
+      }
+    }
+  }
+  return best ? { beatsPerMeasure: best.beatsPerMeasure, noteValue: best.noteValue } : null;
+}
+
+// Correlates a stacked digit pair to each system in systemsOnPage
+// ({ index, yTop, yBottom, maxX? }, same y-space as pageItems — see
+// extractMeasureNumbers above). pad allows the pair to sit slightly outside
+// the system's own auto-detected staff-line band either way (a time
+// signature's ink doesn't always land exactly within it, same reasoning as
+// extractMeasureNumbers' own pad, just a smaller margin since a time
+// signature is engraved ON the staff, not above it). maxX, when the caller
+// supplies it, additionally restricts candidates to before that x — kept as
+// a tested option (a system's own first-barline x, in this same point
+// space, is the obvious value to pass), but scoreAnalysis.js deliberately
+// does NOT feed it the pixel-based firstBarlineCol estimate: that estimate
+// is tuned for a different job (cropping the high-res grid/OCR region) and
+// was found, on a real corpus file, to land BEFORE the real time
+// signature's own x — silently excluding it (see scoreAnalysis.js's own
+// comment at its call site, and the investigation log's 2026-07-25 entry).
+// The system's own narrow y-band plus findStackedDigitPair's own
+// plausibility gates turned out to be sufficient restriction without it.
+// Returns [{ systemIndex, beatsPerMeasure, noteValue }] — deliberately the
+// same shape family as extractMeasureNumbers/extractTempoMarks.
+export function extractTimeSignatures(pageItems, systemsOnPage, { pad = 8 } = {}) {
+  const results = [];
+  for (const sys of systemsOnPage) {
+    const candidates = pageItems.filter((it) => {
+      if (it.y > sys.yTop + pad || it.y < sys.yBottom - pad) return false;
+      if (sys.maxX != null && it.x > sys.maxX) return false;
+      return true;
+    });
+    const pair = findStackedDigitPair(candidates);
+    if (pair) results.push({ systemIndex: sys.index, ...pair });
   }
   return results;
 }

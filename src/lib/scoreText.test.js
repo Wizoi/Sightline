@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   TEMPO_WORDS, groupIntoRows, findTempoMarking, hasTempoMarking, collectKnownNames, findSectionTitle,
   extractMeasureNumbers, refineMeasureCounts, extractTempoMarks, filterMeasureNumberOutliers,
-  detectMeasureNumberResets,
+  detectMeasureNumberResets, findStackedDigitPair, extractTimeSignatures,
 } from './scoreText.js';
 
 // item() mimics the simplified {str, x, y} shape scoreAnalysis.js extracts
@@ -431,6 +431,134 @@ describe('extractTempoMarks', () => {
     const items = [item('= 120', 60, 900)]; // far above the system
     const systems = [{ index: 0, yTop: 500, yBottom: 480 }];
     expect(extractTempoMarks(items, systems)).toEqual([]);
+  });
+});
+
+describe('findStackedDigitPair', () => {
+  it('pairs a numerator directly above a denominator at nearly the same x', () => {
+    // Mirrors takefive.pdf's real 5/4: x=120.8, y=673.77 (numerator) /
+    // 664.73 (denominator), gap 9.0pt.
+    const items = [item('5', 120.8, 673.77), item('4', 120.8, 664.73)];
+    expect(findStackedDigitPair(items)).toEqual({ beatsPerMeasure: 5, noteValue: 4 });
+  });
+
+  it('tolerates a small x jitter between the two digits', () => {
+    const items = [item('6', 53.7, 723.65), item('8', 54.9, 713.65)];
+    expect(findStackedDigitPair(items)).toEqual({ beatsPerMeasure: 6, noteValue: 8 });
+  });
+
+  it('rejects a pair whose x differs by more than xTolerance', () => {
+    const items = [item('4', 50, 700), item('4', 70, 691)]; // 20pt apart in x -- not a stack
+    expect(findStackedDigitPair(items)).toBeNull();
+  });
+
+  it('rejects a pair whose y-gap is outside the plausible range (too far apart)', () => {
+    const items = [item('4', 50, 700), item('4', 50, 600)]; // 100pt apart -- not a stack
+    expect(findStackedDigitPair(items)).toBeNull();
+  });
+
+  it('rejects a pair whose y-gap is outside the plausible range (identical y)', () => {
+    const items = [item('4', 50, 700), item('4', 50, 700)]; // same row, not stacked at all
+    expect(findStackedDigitPair(items)).toBeNull();
+  });
+
+  it('rejects an implausible denominator (not a power of two)', () => {
+    // Two real, unrelated digits (e.g. fingering numbers) that happen to
+    // land at a plausible stacking geometry must not be accepted as a time
+    // signature just because the geometry matches.
+    const items = [item('5', 50, 700), item('3', 50, 691)];
+    expect(findStackedDigitPair(items)).toBeNull();
+  });
+
+  it('rejects a numerator/denominator outside the plausible numeric range', () => {
+    const items = [item('99', 50, 700), item('4', 50, 691)];
+    expect(findStackedDigitPair(items)).toBeNull();
+  });
+
+  it('ignores non-digit items entirely', () => {
+    const items = [item('Andante', 50, 700), item('4', 50, 691), item('4', 50, 682)];
+    expect(findStackedDigitPair(items)).toEqual({ beatsPerMeasure: 4, noteValue: 4 });
+  });
+
+  it('prefers the leftmost, most tightly-stacked plausible pair among several candidates', () => {
+    // A real key signature can put several accidentals before the actual
+    // time signature; only the leftmost tightly-stacked pair should win.
+    const items = [
+      item('4', 200, 700), item('4', 200, 691), // further right -- e.g. a coincidental pair
+      item('3', 50, 700), item('4', 50, 691),   // the real, leftmost time signature
+    ];
+    expect(findStackedDigitPair(items)).toEqual({ beatsPerMeasure: 3, noteValue: 4 });
+  });
+
+  it('returns null when there are fewer than two digit items', () => {
+    expect(findStackedDigitPair([item('4', 50, 700)])).toBeNull();
+    expect(findStackedDigitPair([])).toBeNull();
+  });
+});
+
+describe('extractTimeSignatures', () => {
+  it('reads a real stacked pair within a system\'s own band', () => {
+    const items = [item('5', 120.8, 673.77), item('4', 120.8, 664.73)];
+    const systems = [{ index: 0, yTop: 678, yBottom: 660 }];
+    expect(extractTimeSignatures(items, systems)).toEqual([
+      { systemIndex: 0, beatsPerMeasure: 5, noteValue: 4 },
+    ]);
+  });
+
+  it('allows the pair to sit slightly outside the band, within pad', () => {
+    const items = [item('2', 50, 710), item('4', 50, 701)]; // 2pt above yTop=708
+    const systems = [{ index: 0, yTop: 708, yBottom: 690 }];
+    expect(extractTimeSignatures(items, systems)).toEqual([
+      { systemIndex: 0, beatsPerMeasure: 2, noteValue: 4 },
+    ]);
+  });
+
+  it('ignores a pair outside pad range (e.g. a different system\'s own time signature)', () => {
+    const items = [item('2', 50, 900), item('4', 50, 891)]; // far above this system
+    const systems = [{ index: 0, yTop: 708, yBottom: 690 }];
+    expect(extractTimeSignatures(items, systems)).toEqual([]);
+  });
+
+  it('respects maxX, excluding a pair positioned after the system\'s first barline', () => {
+    // e.g. a real measure-content digit (a fingering, a repeat-ending
+    // number) that happens to stack coincidentally, further right than
+    // where a time signature could actually be engraved.
+    const items = [item('3', 300, 705), item('4', 300, 696)];
+    const systems = [{ index: 0, yTop: 708, yBottom: 690, maxX: 150 }];
+    expect(extractTimeSignatures(items, systems)).toEqual([]);
+  });
+
+  it('accepts a pair before maxX', () => {
+    const items = [item('3', 100, 705), item('4', 100, 696)];
+    const systems = [{ index: 0, yTop: 708, yBottom: 690, maxX: 150 }];
+    expect(extractTimeSignatures(items, systems)).toEqual([
+      { systemIndex: 0, beatsPerMeasure: 3, noteValue: 4 },
+    ]);
+  });
+
+  it('correlates a different pair to each of several systems on one page', () => {
+    // Mirrors Fantastic Parade.pdf: 23 correct 6/8 pairs, one per staff.
+    const items = [
+      item('6', 53.7, 723.65), item('8', 53.7, 713.65),
+      item('6', 53.7, 608.65), item('8', 53.7, 598.65),
+    ];
+    const systems = [
+      { index: 0, yTop: 726, yBottom: 705 },
+      { index: 1, yTop: 611, yBottom: 590 },
+    ];
+    expect(extractTimeSignatures(items, systems)).toEqual([
+      { systemIndex: 0, beatsPerMeasure: 6, noteValue: 8 },
+      { systemIndex: 1, beatsPerMeasure: 6, noteValue: 8 },
+    ]);
+  });
+
+  it('returns an empty list when nothing matches (falls through cleanly)', () => {
+    // Mirrors Departure! Clarinet.pdf: the glyph decodes to an undecoded
+    // SMuFL PUA codepoint, not a plain digit, so no digit items exist at all
+    // in this system's region -- the caller falls back to the pixel/OCR path.
+    const items = [item('', 53.7, 723.65), item('', 53.7, 713.65)];
+    const systems = [{ index: 0, yTop: 726, yBottom: 705 }];
+    expect(extractTimeSignatures(items, systems)).toEqual([]);
   });
 });
 

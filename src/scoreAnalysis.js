@@ -5,7 +5,7 @@ import { estimateMeasureCount } from './lib/barlineDetection.js';
 import { detectStaffRows } from './lib/inkScan.js';
 import {
   groupIntoRows, collectKnownNames, findSectionTitle, findTempoMarking,
-  extractMeasureNumbers, extractTempoMarks, filterMeasureNumberOutliers,
+  extractMeasureNumbers, extractTempoMarks, filterMeasureNumberOutliers, extractTimeSignatures,
 } from './lib/scoreText.js';
 import { buildSections } from './lib/scoreSections.js';
 import {
@@ -562,25 +562,57 @@ export async function analyzeScore() {
         }
       }
 
-      // Best-effort time-signature glyph detection (see timeSigDetection.js)
-      // — only worth the (small, but non-zero) cost of a dedicated high-res
-      // re-render on a page that's actually a section's start, since that's
-      // the only place a "detected — use this?" suggestion attaches.
+      // Best-effort time-signature detection — only worth attempting on a
+      // page that's actually a section's start, since that's the only place
+      // a "detected — use this?" suggestion attaches.
+      //
+      // Try the REAL TEXT LAYER first (lib/scoreText.js's
+      // extractTimeSignatures — see its header and the persona's 2026-07-24
+      // verdict correction): exact and free where it applies, since
+      // `pageItems` was already read above for section-title/measure-number
+      // purposes — no extra getTextContent() call, no render. Deliberately
+      // does NOT pass a maxX (restrict-to-before-the-barline) cutoff here,
+      // even though firstSystemPixelInfo's own firstBarlineCol is sitting
+      // right there and renderHighResRegion below uses exactly that value
+      // for its own crop -- found, on a real corpus file
+      // (randomclarinet/flightofbumblebee.pdf), to be actively harmful for
+      // this purpose: that pixel-based "first column whose ink run covers
+      // 85% of the staff band" estimate landed BEFORE the real time
+      // signature's own x (108.2pt vs. the real pair's 118.8pt), so gating
+      // on it produced a false negative for a file whose text layer
+      // otherwise has the exact, correct answer sitting unused. The
+      // system's own narrow y-band (this is ONE staff, not the whole page)
+      // plus extractTimeSignatures' own plausibility gates (stacked-pair
+      // geometry, power-of-two denominator) plus its "prefers leftmost"
+      // tie-break are enough restriction on their own -- confirmed safe by
+      // re-checking every real positive file this shipped against (see
+      // docs/personas/omr/investigation-log.md's 2026-07-25 entry): removing
+      // the cutoff only ever ADDS candidates further right, so a file that
+      // already found the correct (leftmost) pair keeps finding it.
+      // A text-layer hit is categorically more trustworthy than a pixel-
+      // recognized one (read, not recognized), so it wins outright — the
+      // pixel/OCR fallback below is only attempted when this finds nothing.
       if (isSectionStart && firstSystemPixelInfo) {
         const { globalIndex, rowMin, rowMax, firstBarlineCol } = firstSystemPixelInfo;
-        const { isInk: hiResIsInk, width, height, canvas: hiResCanvas } = await renderHighResRegion(
-          page, pageViewport1x.width, pdfHeight, ah, aw, rowMin, rowMax, firstBarlineCol, rotation,
-        );
-        // This also triggers the same lazy tesseract worker load as the
-        // image-only-PDF measure-number OCR path below (detectTimeSignature
-        // tries both the grid matcher and an OCR read of the same crop) --
-        // tracked separately from usedOcrAnywhere (which drives the "No
-        // embedded text" summary message: a normal text-layer PDF's measure
-        // numbers were NOT read via OCR just because time-sig detection also
-        // used the worker) but still needs the worker freed at the end.
-        ocrWorkerTouched = true;
-        const detected = await detectTimeSignature(hiResCanvas, hiResIsInk, 0, height - 1, 0, width);
-        if (detected) timeSigByIndex[globalIndex] = detected;
+        const textTimeSig = extractTimeSignatures(pageItems, [systemsForText[0]]);
+        if (textTimeSig.length) {
+          const { beatsPerMeasure, noteValue } = textTimeSig[0];
+          timeSigByIndex[globalIndex] = { beatsPerMeasure, noteValue, confidence: 1, source: 'text' };
+        } else {
+          const { isInk: hiResIsInk, width, height, canvas: hiResCanvas } = await renderHighResRegion(
+            page, pageViewport1x.width, pdfHeight, ah, aw, rowMin, rowMax, firstBarlineCol, rotation,
+          );
+          // This also triggers the same lazy tesseract worker load as the
+          // image-only-PDF measure-number OCR path below (detectTimeSignature
+          // tries both the grid matcher and an OCR read of the same crop) --
+          // tracked separately from usedOcrAnywhere (which drives the "No
+          // embedded text" summary message: a normal text-layer PDF's measure
+          // numbers were NOT read via OCR just because time-sig detection also
+          // used the worker) but still needs the worker freed at the end.
+          ocrWorkerTouched = true;
+          const detected = await detectTimeSignature(hiResCanvas, hiResIsInk, 0, height - 1, 0, width);
+          if (detected) timeSigByIndex[globalIndex] = detected;
+        }
       }
 
       if (usedOcr) {

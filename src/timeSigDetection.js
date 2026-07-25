@@ -3,7 +3,11 @@ import { ocrDigitsBox } from './ocr.js';
 
 // Best-effort time-signature reading, via TWO independent methods compared
 // against each other — see lib/timeSigMatch.js's header for why this exists
-// and why it's never trusted blindly. This file is the DOM-facing half:
+// and why it's never trusted blindly. This is the FALLBACK path: the caller
+// (scoreAnalysis.js) tries lib/scoreText.js's extractTimeSignatures (a real
+// text-layer read, exact where it applies — see that file's header) first
+// and only reaches this pixel-based module when that finds nothing. This
+// file is the DOM-facing half:
 // locating a candidate glyph region on the real rendered page, then reading
 // it two ways:
 //   • GRID — resample the region into a fixed-size binary grid and

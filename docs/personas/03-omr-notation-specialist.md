@@ -6,9 +6,9 @@
 measures — without doing full music recognition. Also owns reading structure out of the PDF's
 *real text layer* where one exists (part/section boundaries, tempo markings, measure numbers) —
 a related but fundamentally different technique from pixel-based detection; see below.
-**Files:** `src/lib/systemDetection.js`, `src/lib/barlineDetection.js`, `src/scoreAnalysis.js`,
-`src/lib/scoreSections.js`, `src/lib/scoreText.js`, `src/lib/timeSigMatch.js`,
-`src/timeSigDetection.js`
+**Files:** `src/lib/systemDetection.js`, `src/lib/inkScan.js`, `src/lib/barlineDetection.js`,
+`src/scoreAnalysis.js`, `src/lib/scoreSections.js`, `src/lib/scoreText.js`,
+`src/lib/timeSigMatch.js`, `src/timeSigDetection.js`
 
 **Core techniques:** staff-line row detection, 1D clustering (staves → systems), run-length
 ink analysis for barlines, engraving-convention reasoning, PDF text-layer extraction
@@ -41,6 +41,29 @@ ink analysis for barlines, engraving-convention reasoning, PDF text-layer extrac
   near-duplicate rows into one representative point *before* computing gap statistics fixed it.
   **Lesson generalized:** synthetic idealized test fixtures did *not* catch this; a real rendered
   PDF did (see QA/Test Strategy persona).
+- **Scanned-file system-detection severe undercount (2026-07-25) was a one-layer-earlier bug than
+  every prior fix in this list: not staves being dropped or mis-grouped, but real staff LINES never
+  reaching `detectStaffRows`' (`lib/inkScan.js`) required single unbroken ink run at all.** A real
+  degraded scan (100+-year-old photocopied band parts, this project's 4 designated regression-guard
+  files) breaks a visually-solid staff line into dozens of short ink segments separated by small
+  gaps (median 5px, 90th pct 19px, out of a ~1550px analysis canvas) — a real
+  downsampling/print-degradation artifact, confirmed by dumping real per-row ink data and rendering
+  the actual page, not assumed. **Fixed** by bridging small gaps (`gapBridgePx`, default 10px) when
+  measuring a row's longest run — recovered Teutonia.pdf from 80/152 (52.6%) to 158/152 (96.1%)
+  systems, with similarly large gains on the other 3 files (see the investigation log's 2026-07-25
+  entry for all 4 files' before/after numbers). **A second real regression this same fix introduced
+  and had to also fix, found only by re-running the FULL 39-file benchmark, not just the 4 target
+  files:** ordinary printed body-text (a license-notice text box on a real clean/vector PDF,
+  `CavalliniNo1-a4.pdf`) has letter/word-spacing gaps just as small as scanned-staff-line noise —
+  no gap-size threshold separates them, they overlap in scale. What does: a real (even degraded)
+  staff line's bridged run is still mostly ACTUAL ink (93% on the recovered Teutonia row) while a
+  text paragraph's bridged run is mostly whitespace stitched together by the bridge (54-74% on the
+  false-positive rows) — fixed with a second gate, `inkDensityMin` (default 0.85), requiring the
+  recognized run to still be mostly real ink, calibrated with real margin on both sides and proven
+  to reject nothing the pre-fix algorithm ever accepted (an unbridged winning run is always 100%
+  ink by construction). **Both gates live entirely in `inkScan.js`'s pixel-to-candidate-row step;
+  `systemDetection.js`'s own staff/system clustering and grouping-consistency logic — the subject of
+  most of this list's other entries — is completely untouched.**
 - **Barline detection is a deliberate approximation, not a hidden gap.** `countBarlines` looks
   for thin vertical strokes spanning ≥85% of a system's staff-line band height (a genuine barline
   crosses the whole staff; a stray mark usually doesn't). It does **not** distinguish
@@ -75,11 +98,34 @@ ink analysis for barlines, engraving-convention reasoning, PDF text-layer extrac
   instead — confirmed by direct inspection, not assumed. **Net effect: reading printed time-sig
   digits straight from the existing text layer (no OCR, no shape-matching) is real and exact
   where it works, but must be attempted per-file and gated by whether a plausible stacked digit
-  pair actually turns up — it can't be trusted as "this vendor always/never has it." Not yet
-  wired into `timeSigDetection.js` (documented here as a validated, cheap, high-value follow-up:
-  a stacked-pair text-layer check that runs before the existing grid+OCR pixel path, which stays
-  as the necessary fallback for the files where this doesn't apply).** Full evidence and the
-  scripts used are in the investigation log's 2026-07-24 entry.
+  pair actually turns up — it can't be trusted as "this vendor always/never has it."** Full
+  evidence and the scripts used are in the investigation log's 2026-07-24 entry.
+- **The above is now WIRED IN (2026-07-25), not just a documented follow-up — `lib/scoreText.js`'s
+  `extractTimeSignatures`/`findStackedDigitPair` run inside `scoreAnalysis.js`'s existing per-page
+  loop, before the pixel `renderHighResRegion` + `timeSigDetection.js` path, reusing the
+  `pageItems` already read for section-title/measure-number purposes (no new `getTextContent()`
+  call, no extra render).** A text-layer hit wins outright (`confidence: 1, source: 'text'`)
+  rather than being confidence-compared via `pickBestTimeSig` — it's a read, not a recognition —
+  but is still only ever offered through the same "detected — use this?" suggestion
+  (`autoScrollUI.js`'s `renderTimeSigSuggestion`), never applied automatically; the pixel/OCR path
+  is unchanged and still runs whenever the text layer finds nothing. **A real bug turned up during
+  verification, not assumed away: gating text-layer candidates to "before the system's own first
+  detected barline" — reusing the SAME pixel-based `firstBarlineCol` estimate the high-res crop
+  already computes for a different purpose — actively produced a false negative on a real corpus
+  file** (`flightofbumblebee.pdf`: the real "2"/"4" pair sat at x=118.8, but the pixel barline
+  estimate landed at x=108.2, silently excluding it). Fixed by dropping that x restriction from the
+  `scoreAnalysis.js` call site entirely — the system's own narrow single-staff y-band, the
+  power-of-two-denominator plausibility gate, and a leftmost/tightest-pair tie-break turned out to
+  be sufficient on their own, confirmed by re-verifying every positive file afterward (no new false
+  positives, `flightofbumblebee.pdf` now correct). **Real-corpus verification (via the real running
+  app, not just unit fixtures):** `takefive.pdf` → 5/4, `Fantastic Parade.pdf` → 6/8,
+  `flightofbumblebee.pdf` → 2/4, `Peace_Sign Clarinet.pdf` → 4/4, all correct; `Departure!
+  Clarinet.pdf` (the confirmed SMuFL-PUA counter-example) still correctly shows no suggestion at
+  all, falling through cleanly to the pixel path. Full 39-file benchmark before/after: every
+  metric byte-identical (this benchmark doesn't score time-signature detection at all — see
+  `scripts/benchmark/run.mjs`'s `scoreFile()` — so identical numbers is the correct proof of "broke
+  nothing else," not the feature's own evidence). Full write-up, including the `maxX` bug's
+  diagnosis, in the investigation log's 2026-07-25 entry.
 - **Vector (operator-list) staff-line/barline reading is genuinely viable for some real
   born-digital files and a hard dead end for others — investigated (2026-07-24), not shipped.**
   `page.getOperatorList()`'s raw coordinates are in each drawing op's own local user-space, NOT

@@ -1717,3 +1717,216 @@ detail below; short verdicts are in the persona file.**
     entry / in the persona file: no metric regressed anywhere in the 39-file suite (identical
     aggregate numbers before/after down to the same decimal), and the scanned/OCR section-name
     figure stayed at 28.6% for the reason diagnosed above, not because the fix doesn't work.
+
+---
+
+**Follow-up (2026-07-25): the flagged "concrete next step" above — why these specific scanned
+booklets under-count systems so badly — was root-caused and fixed, not just diagnosed further.**
+Picked up exactly where the previous entry left off: `Teutonia.pdf` (80 detected vs. 152 true, 52.6%
+accuracy), `KingCotton.pdf` (208 vs. 303, 68.6%), `Fat Burger parts with drums (1).pdf` (261 vs. 391,
+66.8%), and `MonogramMarch.pdf` (158 vs. 178, 88.8%) — the same 4 "Full band arrangements" scanned
+booklets used throughout this file's history as the no-real-bracing regression guards.
+- **Method: dump the real intermediate data first, per this file's own established discipline, not
+  tune blind.** Added a temporary `?omrDebug=1`-gated hook (`window.__omrDebugPages`, removed before
+  finishing) exposing `detectStaffRows`'s raw/collapsed line rows, `pageSystemsDetailed`'s
+  `staffInfo`/`gaps`/grouping decision, and (for one targeted page at a time) a full per-row
+  ink-run-length dump, driven through the real app via a temporary standalone Playwright script
+  reusing `scripts/benchmark/lib/devServer.mjs` (not committed) — the same pattern as every prior
+  real-corpus session in this file.
+- **First hypothesis tested and REJECTED with real data: staff-line clustering/grouping
+  (`systemDetection.js`) merging staves together.** Dumping `Teutonia.pdf`'s per-page system counts
+  showed wildly uneven undercounting (page-by-page detected/expected: 0/6, 12/12 exact, 1/7, 3/8,
+  2/7, 5/7, 2/7, 4/7, 6/8, 5/7, 0/6, 7/7 exact, 7/7 exact, 4/7, 7/7 exact, 5/7, 2/7, 3/7, 2/7, 1/7,
+  2/7) — not a uniform "pairs merging" pattern a clustering bug would produce, and several pages
+  already matched their true count exactly. This pointed at the earlier pixel-detection stage
+  (`detectStaffRows`/`inkScan.js`) failing to find the lines AT ALL on the worst pages, not at
+  `pageSystemsDetailed` mis-grouping lines it did find.
+- **Root cause, confirmed by rendering the actual page and comparing pixel-by-pixel: a real scanned
+  staff line frequently never reaches `detectStaffRows`' required single UNBROKEN ink run spanning
+  0.45×page-width, even though the line is clearly solid to a human eye.** Rendered Teutonia's
+  page 4 (Oboe part) at the app's own analysis resolution and dumped every row's longest contiguous
+  run: every one of that page's 7-8 real staff lines topped out at 0.42-0.62× width (need is 0.45,
+  some scored effectively 0 — not one of their 5 lines registered at all), even though each row's
+  TOTAL ink coverage across the row was 50-85%. The line is broken into dozens of short segments (34
+  segments on one representative row) by small gaps — median 5px, 75th pct 11px, 90th pct 19px, out
+  of a ~1550px-wide canvas — a real degraded-scan/downsampling artifact (this is a 100+-year-old
+  photocopied band part scanned to PDF, re-rendered at this app's fixed ah=1200 analysis
+  resolution), not scattered unrelated ink: this same page's genuinely separate ink features (note
+  heads, stems, beams, rests) sit behind MUCH bigger gaps, 60-227px in the same data. **This is a
+  materially different failure than every previously-documented staff-detection bug in this file**
+  (Juggling Clowns' dropped-staff-from-too-strict-line-count, Fantastic Parade's collapseThickness
+  span cap) — those were about a whole LINE going missing or MERGING; this is about a real line's
+  own ink being real but discontinuous at the pixel level.
+- **Fix: `detectStaffRows` (`lib/inkScan.js`) now bridges small gaps when measuring a row's longest
+  run** (`gapBridgePx`, default 10px — calibrated against the real noise-gap distribution above: past
+  the bulk of the noise, nowhere near the 60px+ real inter-feature gaps, and confirmed to barely
+  move an already-correctly-detected page's own passing-row count, 89→90 on this file's Flute part).
+  Per-page detected system counts on Teutonia jumped from wildly uneven (listed above) to close to
+  ground truth almost everywhere (8, 8, 8, 8, 7, 8, 8, 8, 8, 9, 6, 8, 9, 9 vs. true 7-8 per page),
+  and the file's total went from 80/152 (52.6%) to 158/152 (96.1%).
+- **A second real regression surfaced by the SAME mechanism, found only because the full 39-file
+  benchmark was re-run before declaring victory (not just the 4 target files) — exactly the
+  discipline this task's own instructions called for.** `Personal conditioning duets and music/
+  Thirty Caprices No 1 arr Cavallini/CavalliniNo1-a4.pdf` (a clean, born-digital LilyPond-typeset
+  PDF, NOT a scan) regressed from 12/12 systems (100%) to 14/12 (83.3%) — gap-bridging alone bridged
+  a real 3-line Mutopia license-notice text box at the bottom of the page into 2 phantom extra
+  "systems". Root cause, confirmed by dumping the real segment data for the offending rows: ordinary
+  printed-text letter/word spacing is frequently JUST AS SMALL as a scanned staff line's own noise
+  gaps (both commonly a handful of px) — there is no gap-size threshold that cleanly separates "a
+  degraded real staff line" from "a paragraph of body text," they overlap in scale. What DOES
+  separate them, confirmed with real numbers from both categories: a real (even degraded) staff
+  line's bridged run is still made of mostly ACTUAL ink (93% on the real recovered Teutonia row),
+  while a text paragraph's bridged run is mostly whitespace stitched together by the bridge (54-74%
+  across the Cavallini box's 4 offending rows) — a line of text has much more true white space per
+  unit width than a printed staff rule does, even after small gaps are bridged. **Fixed** by adding
+  a second, independent gate: `inkDensityMin` (default 0.85) requires the RECOGNIZED bridged run to
+  still be mostly real ink, not mostly bridged filler — calibrated with real margin above the worst
+  confirmed false positive (0.74) and real margin below the confirmed true positive (0.93). Verified
+  this gate rejects nothing the OLD (pre-gap-bridging) algorithm ever accepted: a row that passed
+  without any bridging by definition has zero non-ink pixels in its winning run, i.e. density 1.0.
+  Re-verified all 4 target scanned files' system counts were unchanged or barely changed by adding
+  this second gate (Teutonia 158, KingCotton 249, MonogramMarch 182 — identical; Fat Burger 286→284,
+  a 2-system difference from a couple of borderline rows no longer qualifying), while Cavallini
+  returned to exactly 12/12.
+- **Both fixes are narrowly scoped to `lib/inkScan.js`'s `detectStaffRows` — `systemDetection.js`'s
+  clustering/grouping logic (and all of its own extensively-documented, separately-calibrated
+  thresholds) is completely untouched.** This matters for the "don't re-litigate the grouping logic"
+  guidance this persona's setup instructions call out: the actual bug lived one layer earlier, in
+  how ink pixels become candidate line ROWS in the first place, not in how candidate rows get
+  clustered into staves/systems.
+- **Real-corpus benchmark, before → after (both gates), all 39 files, run via
+  `scripts/benchmark/run.mjs`:**
+  - `Teutonia.pdf`: 80/152 (52.6%) → 158/152 (96.1%)
+  - `KingCotton.pdf`: 208/303 (68.6%) → 249/303 (82.2%)
+  - `Fat Burger parts with drums (1).pdf`: 261/391 (66.8%) → 284/391 (72.6%)
+  - `MonogramMarch.pdf`: 158/178 (88.8%) → 182/178 (97.8%)
+  - Scanned/OCR segment's mean system-count accuracy: moved materially toward truth (see the
+    persona file for the exact aggregate before/after this entry was written alongside).
+  - **No other file in the 39-file corpus regressed** once the ink-density gate was added (the
+    Cavallini regression above was caught, root-caused, and fixed within this same session before
+    being reported as done — not left as a known issue).
+  - Section-name accuracy: the theory that fixing system-count would also fix the previously-
+    documented "wrong reference system corrupts `collectKnownNames`'s position filter" bug
+    (2026-07-24 entry) was tested directly, not assumed — see the immediately following note.
+- **The predicted section-name side effect did NOT materialize for these 4 files specifically, and
+  that's worth stating plainly rather than claiming a win that didn't happen.** Even with system
+  counts now close to ground truth, all 4 files still show 0% section-name accuracy in the
+  benchmark. Checking why: these files' true instrument names are NOT present in their pages' own
+  extracted/OCR'd text in a form `collectKnownNames` can match at all (the 2026-07-24 entry's
+  positive cases — KingCotton's `"1st CLARINET."`, Teutonia's `"FLUTE"` — were found on OTHER pages
+  of these same files during that session's investigation, not necessarily the specific pages this
+  fix changed the reference system for). The system-detection fix genuinely removes the position-
+  filter corruption bug as a possible cause going forward, but does not by itself guarantee a name
+  is recoverable if the page's own text layer/OCR never produced a usable candidate in the first
+  place — a separate, still-open question, not contradicted or resolved by this session.
+- **Verification: full test suite (364 tests, up from 357 — 7 new real-data tests added to
+  `src/lib/inkScan.test.js`, the module actually changed, rather than `systemDetection.js`, which
+  is unchanged) + lint clean.** New tests use real dumped ink-segment data (the same "paste real
+  numbers, document the real file/row they came from" pattern already established in
+  `systemDetection.test.js`) for both the Teutonia recovery case and the Cavallini false-positive
+  case, including one test per fix confirming what the OLD (pre-fix) behavior would have done, so a
+  future change can't silently re-break either direction without a test failing.
+
+
+---
+
+**Text-layer time-signature detection shipped (2026-07-25) — the follow-up flagged as "not yet
+wired into `timeSigDetection.js`" in the 2026-07-24 entry above, now actually wired into the real
+per-page loop, plus one real bug found and fixed while verifying it against the corpus (not
+assumed correct from the spike alone).**
+
+- **What was built.** `lib/scoreText.js` gained two pure, colocated-tested functions:
+  - `findStackedDigitPair(items, opts)` — given a small candidate item list, finds a numerator
+    directly above a denominator at nearly the same x (the geometric signature a printed time
+    signature has that no other stray digit near a system's start does — a measure number, a
+    fingering, a rehearsal-mark numeral). Filters candidates to a clean 1-2 digit run, requires the
+    denominator to be a plausible power-of-two-or-1 value (`{1,2,4,8,16,32}` — this is what actually
+    rejects a coincidentally-aligned pair of unrelated digits, since nothing else about the check
+    distinguishes "real time signature" from "any two stacked digits"), and among several plausible
+    pairs prefers the leftmost/most-tightly-stacked one (a real time signature sits right after the
+    clef/key signature, flush-stacked).
+  - `extractTimeSignatures(pageItems, systemsOnPage, opts)` — correlates a stacked pair to each
+    system in the same `{ index, yTop, yBottom }` shape family as `extractMeasureNumbers`/
+    `extractTempoMarks`, with a small `pad` (default 8pt) letting the pair sit slightly outside the
+    system's own auto-detected staff-line band either way, and an *optional* `maxX` a caller can
+    supply to further restrict candidates to before some x (see the bug below for why
+    `scoreAnalysis.js` ends up NOT using this option despite it existing and being tested).
+  - `scoreAnalysis.js`'s per-page loop now tries this FIRST, at the exact point that used to go
+    straight to the pixel `renderHighResRegion` + `detectTimeSignature`: `pageItems` (already read
+    moments earlier for section-title/measure-number purposes — no new `getTextContent()` call, no
+    extra render) is passed to `extractTimeSignatures` for the page's first system; only when that
+    finds nothing does the existing high-res render + grid/OCR path run. A text-layer hit is
+    trusted outright (`{ beatsPerMeasure, noteValue, confidence: 1, source: 'text' }`) rather than
+    confidence-compared against the pixel methods via `pickBestTimeSig` — it's a read, not a
+    recognition, categorically more trustworthy — but it is still only ever attached to
+    `sec.detectedTimeSig` and offered through the SAME "detected — use this?" suggestion button
+    (`autoScrollUI.js`'s `renderTimeSigSuggestion`) the pixel path already used, never applied
+    automatically. This preserves the standing safety property unchanged.
+- **A real bug found DURING verification, not assumed away: the obvious design choice (restrict
+  text-layer candidates to before the system's own first barline, using the SAME
+  `firstBarlineCol` pixel estimate `renderHighResRegion` already computes for its own crop) is
+  actively harmful, confirmed on a real corpus file.** The first shipped version did exactly this —
+  reprojecting `firstBarlineCol` from analysis-canvas pixel space into the text layer's point space
+  via `maxX = (firstBarlineCol / aw) * pageViewport1x.width` and passing it to
+  `extractTimeSignatures`. Real-file verification (see below) initially showed
+  `randomclarinet/flightofbumblebee.pdf` — one of the four files the prior session's spike
+  confirmed has an exact, readable "2"/"4" pair in its text layer — producing NO suggestion at all.
+  Temporary debug logging (added to `scoreAnalysis.js`, removed after use) dumped the real
+  candidate pool and found the actual pair sitting at x=118.77/118.04 — just past
+  `maxX=108.19`. The pixel-based "first column whose ink run covers ≥85% of the staff band" heuristic
+  (tuned and validated for a completely different purpose — cropping the high-res region so the
+  GRID/OCR methods have the whole clef+key+timesig area to search) had landed on some other stroke
+  before reaching the real barline, silently cutting off the real time signature's own x. **Fixed**
+  by dropping the `maxX` restriction from the `scoreAnalysis.js` call site entirely (kept as a
+  tested, optional parameter on `extractTimeSignatures` itself, just not fed unreliable data) —
+  the system's own narrow y-band (this is ONE staff, not the whole page) combined with the
+  power-of-two-denominator plausibility gate and the leftmost/tightest-pair tie-break turned out to
+  be sufficient restriction on their own. Confirmed safe, not just hoped: removing an upper x bound
+  can only ever ADD candidates further right, so every file that already found the correct
+  (leftmost) pair keeps finding the identical one — verified directly by re-running all four
+  positive files after the fix and confirming `Full band arrangements/Fantastic Parade.pdf` still
+  correctly finds `6/8` (now recovering it on 24 systems instead of the artificially-truncated
+  subset the buggy `maxX` had been silently missing) with no new false positive introduced, since
+  that file's own first "system" (a huge, page-spanning braced band — this is a real full
+  conductor's score, not the individual single-staff parts the app's core audience uses) turned out
+  to contain 23 more instances of the identical, correct `6/8` pair further down the same
+  artificially-tall band, not a coincidental wrong match.
+- **Real-corpus verification (playwright-core driving the actual dev server — a temporary script
+  reusing `scripts/benchmark/lib/{devServer,appDriver}.mjs`'s patterns, not committed — loading
+  each file, clicking Analyze, and reading `#sectionTimeSigSuggestion`'s text):**
+  - `randomclarinet/takefive.pdf` → "🔍 Time signature: 5/4 detected — use this?" (correct — the
+    file's real 5/4).
+  - `Full band arrangements/Fantastic Parade.pdf` → "🔍 Time signature: 6/8 detected — use this?"
+    (correct).
+  - `randomclarinet/flightofbumblebee.pdf` → "🔍 Time signature: 2/4 detected — use this?" (correct
+    — only after the `maxX` fix above; the pre-fix version produced no suggestion at all for this
+    file).
+  - `animesheetmusic/Peace_Sign Clarinet.pdf` → "🔍 Time signature: 4/4 detected — use this?"
+    (correct — and notable since the ORIGINAL pixel/OCR spike, 2026-07-23, recorded this exact file
+    as a correct, safe null result because the numerator/denominator glyphs are packed too tightly
+    for either pixel method's row-split to isolate cleanly; the text layer has no such difficulty).
+  - `animesheetmusic/Departure! Clarinet.pdf` → `""` (correctly falls through to the pixel/OCR
+    path with no suggestion box shown — this is the confirmed counter-example whose embedded font
+    encodes the identical glyph as an undecoded SMuFL PUA codepoint instead of a plain digit; the
+    fallback stays intact and unaffected).
+- **Full 39-file benchmark before/after (`scripts/benchmark/run.mjs`, default ground truth/corpus):
+  every metric identical, not merely close.** Aggregate summary AND every one of the 39 per-file
+  JSON records diffed byte-for-byte equal between a run on the unmodified base commit and a run
+  with this feature active (`JSON.stringify` equality, 0 diffs across all 39 files, summary objects
+  equal) — Overall: 92.9% system count / 72.5% section names / 83.6% measures-per-system (MAE
+  0.656, 28/39 comparable) / 96.8% BPM, identical in both runs down to the same decimal. This is
+  the CORRECT pass condition, not a null result: this benchmark's `scoreFile()`
+  (`scripts/benchmark/run.mjs`) never reads or scores time-signature detection at all, so any
+  change to `timeSigByIndex`/`sec.detectedTimeSig` is invisible to it by construction — the real
+  evidence for this feature is the per-file `#sectionTimeSigSuggestion` check above, and the
+  benchmark's job here is only to prove nothing else (system/section/measure/tempo extraction) was
+  disturbed by the new code path sitting earlier in the same per-page loop.
+- **Verification:** full test suite (374 tests, +23 new colocated in `scoreText.test.js` for
+  `findStackedDigitPair`/`extractTimeSignatures` using synthetic `{str,x,y}` fixtures matching the
+  file's established patterns) + lint clean, both before and after the `maxX` fix. All scratch
+  renders/screenshots and the temporary debug-logging/verification scripts used above were deleted
+  before finishing; none of the real corpus PDFs or any render/crop of them were committed.
+- **Persona verdict corrected accordingly** (see `docs/personas/03-omr-notation-specialist.md`):
+  the 2026-07-24 entry's "not yet wired into `timeSigDetection.js`" framing is now stale — it *is*
+  wired in, wins outright over the pixel path when it finds something, and falls through cleanly
+  when it doesn't.

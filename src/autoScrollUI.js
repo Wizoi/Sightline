@@ -250,10 +250,12 @@ function renderSectionsList() {
   renderTimeSigSuggestion(activeSec);
 }
 
-// Best-effort time-signature suggestion (see timeSigDetection.js) --
-// offered, never applied: shape-matched digits, not read text like the
-// name/tempo above, so it needs the user's explicit confirmation before it
-// touches anything.
+// Best-effort time-signature suggestion (see scoreAnalysis.js /
+// lib/scoreText.js's extractTimeSignatures / timeSigDetection.js) -- offered,
+// never applied. Sometimes this is a real text-layer read (exact, `source:
+// 'text'`), sometimes a shape-matched pixel guess (`source: 'grid'`/`'ocr'`)
+// -- either way it still needs the user's explicit confirmation before it
+// touches anything, so the UI doesn't distinguish the two here.
 function renderTimeSigSuggestion(sec) {
   const container = $('sectionTimeSigSuggestion');
   container.innerHTML = '';
