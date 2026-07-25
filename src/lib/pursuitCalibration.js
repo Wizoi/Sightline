@@ -1,4 +1,4 @@
-import { fitCalibration, looResiduals } from './calibrationModel.js';
+import { fitCalibration, looResiduals, applyX, applyY } from './calibrationModel.js';
 import { mean } from './mathUtils.js';
 
 // --- Smooth-pursuit calibration (item 3): an alternative to the 9-dot grid ---
@@ -125,14 +125,29 @@ export const DEFAULT_SEGMENTS = 10;
 // exactly the failure mode that made pursuit inconsistent run to run.
 export const DEFAULT_DWELL_COUNT = 4;
 export const DEFAULT_DWELL_SEC = 0.6;
+// Time spent easing INTO and OUT OF each dwell, rather than stopping and
+// restarting instantly. Reported from real use as "seems to be abrupt," and
+// it's a data problem as much as a comfort one: smooth pursuit carries
+// momentum, so a target that stops dead is overshot by the eye, and one that
+// restarts at full speed is caught up to with a saccade. Both corrupt the
+// samples immediately around each dwell — precisely the samples the dwells
+// exist to make clean. Velocity ramps linearly to zero and back, which makes
+// the target's speed continuous through the stop (position stays smooth),
+// the property the eye actually tracks.
+export const DEFAULT_DWELL_EASE_SEC = 0.35;
 
 // Real wall-clock length of the moving phase, including the dwell holds.
 // The sweep's own trajectory time is still `durationSec`; dwells add real
 // time without advancing the trajectory (see sweepTimeFromElapsed).
 export function totalPursuitSec(durationSec = DEFAULT_DURATION_SEC, {
   dwellCount = DEFAULT_DWELL_COUNT, dwellSec = DEFAULT_DWELL_SEC,
+  easeSec = DEFAULT_DWELL_EASE_SEC,
 } = {}) {
-  return durationSec + dwellCount * dwellSec;
+  // Each dwell costs its hold plus the ease pair. The two ease phases run
+  // for 2*easeSec of real time but only advance the trajectory by easeSec
+  // (average velocity 0.5 across a linear ramp), so the NET extra real time
+  // per dwell is dwellSec + easeSec, not dwellSec + 2*easeSec.
+  return durationSec + dwellCount * (dwellSec + easeSec);
 }
 
 // Maps real elapsed time (since the sweep began) to the sweep's own
@@ -148,18 +163,49 @@ export function totalPursuitSec(durationSec = DEFAULT_DURATION_SEC, {
 // downstream continuing to work in sweep time exactly as before.
 export function sweepTimeFromElapsed(elapsedSec, durationSec = DEFAULT_DURATION_SEC, {
   dwellCount = DEFAULT_DWELL_COUNT, dwellSec = DEFAULT_DWELL_SEC,
+  easeSec = DEFAULT_DWELL_EASE_SEC,
 } = {}) {
   if (dwellCount <= 0 || dwellSec <= 0) return Math.max(0, Math.min(durationSec, elapsedSec));
+  const ease = Math.max(0, easeSec);
+  const half = ease / 2;
   let remaining = Math.max(0, elapsedSec);
   let sweep = 0;
   for (let i = 1; i <= dwellCount; i++) {
+    // Each dwell is centered on its trajectory position, with the decel
+    // consuming the half-ease before it and the accel the half-ease after,
+    // so the stop happens exactly where a hard freeze used to.
     const dwellAt = (durationSec * i) / (dwellCount + 1);
-    const untilDwell = dwellAt - sweep;
-    if (remaining < untilDwell) return sweep + remaining;
-    remaining -= untilDwell;
-    sweep = dwellAt;
-    if (remaining < dwellSec) return sweep;  // currently holding still
+
+    // Full-speed run up to where deceleration begins.
+    const untilDecel = (dwellAt - half) - sweep;
+    if (remaining < untilDecel) return sweep + remaining;
+    remaining -= untilDecel;
+    sweep = dwellAt - half;
+
+    // Decelerate: velocity 1 -> 0 linearly over `ease` real seconds, which
+    // advances the trajectory by ease/2 (the integral of that ramp).
+    if (ease > 0) {
+      if (remaining < ease) {
+        const f = remaining / ease;
+        return sweep + ease * (f - (f * f) / 2);
+      }
+      remaining -= ease;
+      sweep = dwellAt;
+    }
+
+    // Hold: trajectory frozen, clock still running.
+    if (remaining < dwellSec) return sweep;
     remaining -= dwellSec;
+
+    // Accelerate: velocity 0 -> 1, mirroring the decel.
+    if (ease > 0) {
+      if (remaining < ease) {
+        const f = remaining / ease;
+        return sweep + ease * ((f * f) / 2);
+      }
+      remaining -= ease;
+      sweep = dwellAt + half;
+    }
   }
   return Math.min(durationSec, sweep + remaining);
 }
@@ -355,4 +401,66 @@ export function fitPursuitCalibration(samples, durationSec = DEFAULT_DURATION_SE
     gnorm: fit.gnorm, coefX: fit.coefX, coefY: fit.coefY,
     quality, calibPoints,
   };
+}
+
+// Slider bounds for "Eye-tracking smoothing" (index.html's #sm) — the
+// suggestion below is clamped into the same range a user could pick by hand.
+export const SMOOTH_WIN_MIN = 3;
+export const SMOOTH_WIN_MAX = 40;
+
+// Per-frame gaze noise, in screen fractions, measured from a completed
+// calibration. Takes the FIRST DIFFERENCE of the model's residual (predicted
+// minus true target) between consecutive samples: differencing cancels both
+// the target's own motion and any slowly-varying bias in the fit, leaving
+// the frame-to-frame jitter that smoothing actually exists to suppress.
+// Dividing by sqrt(2) converts the spread of that difference back to the
+// spread of a single frame's noise (differencing two independent samples
+// doubles the variance).
+export function estimateGazeNoise(samples, durationSec, { gnorm, coefX, coefY }, opts = {}) {
+  const rows = samples
+    .filter((s) => s.tSec >= 0 && s.tSec <= durationSec)
+    .sort((a, b) => a.tSec - b.tSec);
+  if (rows.length < 8) return null;
+  const resid = rows.map((s) => {
+    const t = pursuitTarget(s.tSec, durationSec, opts);
+    return { dx: applyX(s, coefX, gnorm) - t.x, dy: applyY(s, coefY, gnorm) - t.y };
+  });
+  const diffs = [];
+  for (let i = 1; i < resid.length; i++) {
+    diffs.push(Math.hypot(resid[i].dx - resid[i - 1].dx, resid[i].dy - resid[i - 1].dy));
+  }
+  if (!diffs.length) return null;
+  // Median rather than mean: a blink or a lost frame produces a huge
+  // one-off difference that would otherwise dominate the estimate.
+  const sorted = diffs.slice().sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)];
+  return med / Math.SQRT2;
+}
+
+// Residual frame-to-frame jitter we aim to leave after smoothing, as a
+// fraction of screen height. Anchored two ways rather than derived from a
+// convenient-looking ratio: (a) ~0.7% of screen height is a handful of
+// pixels on a laptop — below where the gaze dot reads as visibly jumpy, and
+// far inside a single staff's height, so it can't cause a spurious
+// system-to-system flip; (b) it is calibrated so that TYPICAL measured
+// noise lands near smoothWin 12, the existing hand-tuned default, which
+// means this suggestion refines that default rather than fighting it.
+//
+// An earlier version of this derived the target from cfg.deadZoneFrac
+// (dead zone / 6). That was wrong and worth recording: the dead zone
+// defaults to 0.18 — eighteen percent of the screen — so even a sixth of it
+// is a huge tolerance, and the formula returned the minimum smoothing for
+// every realistic noise level. The dead zone is what a SUSTAINED gaze
+// offset must not cross; it says nothing about acceptable per-frame jitter.
+export const TARGET_JITTER_FRAC = 0.007;
+
+// Turns measured per-frame noise into a smoothing-slider value. Averaging
+// over N frames reduces noise by ~sqrt(N) (the One Euro filter is adaptive
+// rather than a plain N-frame mean, but its resting behavior is calibrated
+// from smoothWin on exactly that N-frame time-constant basis — see
+// followLogic.js's minCutoffFromSmoothWin), so N ~= (noise / target)^2.
+export function suggestSmoothWin(noiseStd, targetJitter = TARGET_JITTER_FRAC) {
+  if (!(noiseStd > 0) || !(targetJitter > 0)) return null;
+  const n = Math.round((noiseStd / targetJitter) ** 2);
+  return Math.max(SMOOTH_WIN_MIN, Math.min(SMOOTH_WIN_MAX, n));
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   pursuitTarget, segmentIndexAt, buildPursuitCalibPoints, fitPursuitCalibration, estimateLag,
-  DEFAULT_DURATION_SEC, DEFAULT_SEGMENTS, CX, CY, AX, AY,
+  DEFAULT_DURATION_SEC, DEFAULT_SEGMENTS, CX, CY, AX, AY, totalPursuitSec, sweepTimeFromElapsed, suggestSmoothWin, SMOOTH_WIN_MIN, SMOOTH_WIN_MAX, DEFAULT_DWELL_COUNT, DEFAULT_DWELL_SEC,
 } from './pursuitCalibration.js';
 import { applyX, applyY, fitCalibration } from './calibrationModel.js';
 
@@ -239,5 +239,59 @@ describe('pursuitTarget: center start + speed ramp (real-user findings, 2026-07-
     expect(maxX).toBeCloseTo(CX + AX, 2);
     expect(minY).toBeCloseTo(CY - AY, 2);
     expect(maxY).toBeCloseTo(CY + AY, 2);
+  });
+});
+
+describe('dwell easing + auto smoothing (real-user findings, 2026-07-25)', () => {
+  const D = DEFAULT_DURATION_SEC;
+
+  it('eases into and out of each dwell instead of stopping dead -- velocity stays continuous', () => {
+    const total = totalPursuitSec(D);
+    let maxStep = 0, prev = null;
+    for (let t = 0; t < total - 0.02; t += 0.01) {
+      const v = (sweepTimeFromElapsed(t + 0.01, D) - sweepTimeFromElapsed(t, D)) / 0.01;
+      if (prev !== null) maxStep = Math.max(maxStep, Math.abs(v - prev));
+      prev = v;
+    }
+    // A hard freeze steps velocity 1 -> 0 in a single frame. Easing keeps
+    // every frame-to-frame change small.
+    expect(maxStep).toBeLessThan(0.2);
+  });
+
+  it('still fully stops for the intended total hold time, and still completes the whole sweep', () => {
+    const total = totalPursuitSec(D);
+    let stopped = 0;
+    for (let t = 0; t < total; t += 0.01) {
+      if (Math.abs(sweepTimeFromElapsed(t + 0.01, D) - sweepTimeFromElapsed(t, D)) < 1e-9) stopped += 0.01;
+    }
+    expect(stopped).toBeGreaterThan(DEFAULT_DWELL_COUNT * DEFAULT_DWELL_SEC * 0.8);
+    expect(sweepTimeFromElapsed(total, D)).toBeCloseTo(D, 6);
+  });
+
+  it('elapsed -> sweep time is monotonic (never runs the trajectory backwards)', () => {
+    const total = totalPursuitSec(D);
+    let prev = -1;
+    for (let t = 0; t <= total; t += 0.005) {
+      const v = sweepTimeFromElapsed(t, D);
+      expect(v).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = v;
+    }
+  });
+
+  it('suggestSmoothWin maps more measured noise to more smoothing, clamped to the slider range', () => {
+    expect(suggestSmoothWin(0.001)).toBe(SMOOTH_WIN_MIN);
+    expect(suggestSmoothWin(1.0)).toBe(SMOOTH_WIN_MAX);
+    expect(suggestSmoothWin(0.035)).toBeGreaterThan(suggestSmoothWin(0.015));
+  });
+
+  it('typical measured noise lands near the existing hand-tuned default of 12, so this refines that default rather than fighting it', () => {
+    const s = suggestSmoothWin(0.024);
+    expect(s).toBeGreaterThanOrEqual(9);
+    expect(s).toBeLessThanOrEqual(16);
+  });
+
+  it('returns null for an unusable noise estimate rather than guessing', () => {
+    expect(suggestSmoothWin(0)).toBeNull();
+    expect(suggestSmoothWin(null)).toBeNull();
   });
 });

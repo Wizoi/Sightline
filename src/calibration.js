@@ -6,7 +6,8 @@ import {
   calibMismatch as calibMismatchPure,
 } from './lib/calibrationModel.js';
 import {
-  pursuitTarget, fitPursuitCalibration, sweepTimeFromElapsed, totalPursuitSec, CX, CY,
+  pursuitTarget, fitPursuitCalibration, sweepTimeFromElapsed, totalPursuitSec,
+  estimateGazeNoise, suggestSmoothWin, CX, CY,
   DEFAULT_DURATION_SEC as PURSUIT_DURATION_SEC,
   DEFAULT_LEAD_IN_SEC as PURSUIT_LEAD_IN_SEC,
 } from './lib/pursuitCalibration.js';
@@ -258,6 +259,30 @@ export function runPursuitCalibration() {
     // and how much data the fit actually got. Diagnose before tuning
     // further — see the OMR persona's own "dump the real data first"
     // precedent for why this comes before another threshold guess.
+    // Auto-set the "Eye-tracking smoothing" slider from the jitter actually
+    // measured during this sweep. The app has never had a principled value
+    // for this — it shipped as a slider the user was expected to guess at —
+    // but calibration is exactly the moment the real per-frame noise for
+    // THIS user, camera, and lighting is observable against a known target.
+    // Only ever applied when the measurement succeeds; a failed estimate
+    // leaves whatever the user already had.
+    const noiseRows = projectEyeMode(rel, state.eyeMode);
+    const noise = estimateGazeNoise(noiseRows, PURSUIT_DURATION_SEC, {
+      gnorm: result.gnorm, coefX: result.coefX, coefY: result.coefY,
+    });
+    const suggested = noise == null ? null : suggestSmoothWin(noise);
+    if (suggested != null) {
+      const el = $('sm');
+      if (el) {
+        el.value = String(suggested);
+        // Dispatch through the normal input path so settings.js's own
+        // binding updates cfg.smoothWin and the printed value together,
+        // rather than setting cfg here and letting the UI drift out of sync.
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      console.log('[pursuit] measured per-frame noise %s%% of screen -> smoothing %d',
+        (noise * 100).toFixed(2), suggested);
+    }
     console.log('[pursuit] lag=%ss corr=%s rawSamples=%d fittedPoints=%d',
       result.lagSec.toFixed(3), (result.lagCorrelation ?? 0).toFixed(4),
       rel.length, result.calibPoints.length);
