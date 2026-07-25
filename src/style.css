@@ -130,7 +130,21 @@ body {
   border: 1px solid #30363d; border-radius: 8px;
   cursor: pointer; font-size: 13px;
 }
-#panel button:hover { border-color: var(--accent); }
+/* Disabled controls must LOOK disabled. Without this they rendered
+   identically to live ones -- and the :hover rule below even highlighted
+   them on hover -- so a button waiting on the camera or a calibration read
+   as broken rather than as not-yet-available. The :not(:disabled) guard on
+   hover is the other half of that: an unavailable control shouldn't respond
+   to the pointer at all. */
+#panel button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #171b21;
+  color: var(--muted);
+  border-color: #23282f;
+}
+#panel button:disabled:hover { border-color: #23282f; }
+#panel button:not(:disabled):hover { border-color: var(--accent); }
 #panel button.primary { background: var(--accent); color: #04222e; border-color: var(--accent); font-weight: 600; }
 #panel button.on { border-color: var(--good); color: var(--good); }
 #panel .row { display: flex; gap: 6px; }

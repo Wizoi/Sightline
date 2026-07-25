@@ -86,8 +86,21 @@ export function refreshControlStates() {
     const el = $(id);
     if (!el) return;
     el.disabled = !ok;
-    if (ok) el.removeAttribute('data-blocked');
-    else el.setAttribute('data-blocked', why);
+    if (ok) {
+      // Restore whatever explanatory title the markup shipped with, rather
+      // than clearing it outright -- several of these buttons have a real
+      // description that should come back once they're usable again.
+      const original = el.getAttribute('data-title') || '';
+      if (original) el.title = original; else el.removeAttribute('title');
+      el.removeAttribute('data-blocked');
+    } else {
+      // Stash the original title once, then replace it with the reason this
+      // control isn't available yet -- a disabled button that says nothing
+      // leaves the user guessing which prerequisite they're missing.
+      if (!el.hasAttribute('data-title')) el.setAttribute('data-title', el.title || '');
+      el.title = why;
+      el.setAttribute('data-blocked', why);
+    }
   };
 
   gate('calibBtn', camReady, 'Start the camera first');
