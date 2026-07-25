@@ -11,7 +11,6 @@ import {
   DEFAULT_DURATION_SEC as PURSUIT_DURATION_SEC,
   DEFAULT_LEAD_IN_SEC as PURSUIT_LEAD_IN_SEC,
 } from './lib/pursuitCalibration.js';
-import { canFollow } from './tracking/index.js';
 
 // A ~550ms capture window at a typical webcam framerate (~30fps) yields
 // roughly 15-20 samples per dot; an unusually high-framerate camera could
@@ -116,7 +115,6 @@ function applyFittedModel(gnorm, coefX, coefY, { poor, poorReasons } = {}) {
   saveCalibration();
   $('calibBtn').textContent = '🎯 Recalibrate';
   refreshControlStates();
-  $('runBtn').disabled = !canFollow();
   if (poor) {
     showRecalBanner(poorReasons || ['calibration fit looks imprecise for one or more points']);
     setStatus('s-warn', 'calibrated & saved — fit looks imprecise, consider recalibrating');

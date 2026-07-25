@@ -2,7 +2,7 @@ import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import { state } from './appState.js';
 import { $, video, setStatus, showRecalBanner, refreshControlStates } from './ui.js';
 import { loadCalibration, calibMismatch, currentFingerprint, calibModelId } from './calibration.js';
-import { getActiveTracking, canFollow } from './tracking/index.js';
+import { getActiveTracking } from './tracking/index.js';
 
 // MediaPipe's WASM runtime and the face-landmarker model are served from
 // this app's own origin (public/mediapipe/, populated at dev/build time by
@@ -82,7 +82,6 @@ export async function startCamera() {
     // enabled — a tracking type that doesn't need calibration (e.g. wink
     // tracking) should unlock it as soon as the camera (and a PDF) are ready.
     refreshControlStates();
-    $('runBtn').disabled = !canFollow();
     requestAnimationFrame(predict);
   } catch (e) {
     setStatus('s-bad', 'camera/model blocked — allow the camera, or serve via http://localhost');

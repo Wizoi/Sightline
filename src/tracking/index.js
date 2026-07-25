@@ -23,8 +23,22 @@ export function setTrackingType(id) {
 // app is broken rather than like something needing 20 seconds of setup, and
 // the user has no reason to suspect which. Wink tracking is unaffected, since
 // it has nothing to calibrate or verify.
+// Returns [ok, reason] — the reason names the specific missing prerequisite
+// so the UI can tell the user which step they still owe, instead of leaving
+// the most-gated button in the app as the one that explains itself least.
+export function followGate() {
+  if (!state.camReady) return [false, 'Start the camera first'];
+  if (!state.pdfDoc) return [false, 'Load a PDF first'];
+  if (!getActiveTracking().needsCalibration) return [true, ''];
+  if (!state.calibrated) return [false, 'Calibrate first'];
+  if (!state.verified) return [false, 'Run Verify first'];
+  return [true, ''];
+}
+
+// Deliberately derived from followGate rather than re-stating its conditions:
+// a second copy of this logic is exactly how a button ends up disabled while
+// something else believes it should be live, with no way to see which is
+// right.
 export function canFollow() {
-  if (!state.camReady || !state.pdfDoc) return false;
-  if (!getActiveTracking().needsCalibration) return true;
-  return !!(state.calibrated && state.verified);
+  return followGate()[0];
 }

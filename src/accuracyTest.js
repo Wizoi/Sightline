@@ -1,6 +1,6 @@
 import { state } from './appState.js';
 import { $, toast, refreshControlStates } from './ui.js';
-import { canFollow } from './tracking/index.js';
+
 import { saveCalibration } from './calibration.js';
 import { median } from './lib/mathUtils.js';
 
@@ -114,6 +114,5 @@ function finishTest(results, bright, noFace, frames, vHit, vTot) {
   state.verified = true;
   saveCalibration();
   refreshControlStates();
-  $('runBtn').disabled = !canFollow();
   $('accres').style.display = 'flex';
 }

@@ -1,4 +1,5 @@
 import { cfg, state } from './appState.js';
+import { followGate } from './tracking/index.js';
 
 export const $ = (id) => document.getElementById(id);
 
@@ -110,4 +111,14 @@ export function refreshControlStates() {
   gate('recenterBtn', camReady && calibrated, 'Calibrate first');
   gate('analyzeScoreBtn', hasPdf, 'Load a PDF first');
   gate('showSys', hasPdf, 'Load a PDF first');
+
+  // "Follow eyes" has the longest prerequisite chain, so it gets a reason
+  // naming the specific missing step rather than a generic one. It used to be
+  // set by half a dozen callers as `disabled = !canFollow()` with no
+  // explanation at all, which meant the most-gated button in the app was also
+  // the one that explained itself least -- reported from real use as "after
+  // verify, follow eyes is still not enabled" with no way to see why.
+  const [followOk, followWhy] = followGate();
+  gate('runBtn', followOk, followWhy);
 }
+

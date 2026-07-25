@@ -3,7 +3,6 @@ import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { cfg, state } from './appState.js';
 import { $, scoreEl, emptyEl, toast, syncAutoScrollButton, refreshControlStates } from './ui.js';
 import { detectSystems } from './systemDetection.js';
-import { canFollow } from './tracking/index.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
@@ -24,7 +23,6 @@ export async function loadPdf(arrayBuffer) {
   await renderAll();
   emptyEl.style.display = 'none';
   refreshControlStates();
-  $('runBtn').disabled = !canFollow();
 }
 
 // A generation counter guards against overlapping calls (resize/zoom/panel-

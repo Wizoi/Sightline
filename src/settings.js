@@ -4,7 +4,7 @@ import { detectSystems, renderSysMarks } from './systemDetection.js';
 import { renderAll } from './pdf.js';
 import { repositionAutoScroll } from './autoScrollController.js';
 import { setCameraZoom } from './camera.js';
-import { TRACKING_TYPES, getActiveTracking, setTrackingType, canFollow } from './tracking/index.js';
+import { TRACKING_TYPES, getActiveTracking, setTrackingType } from './tracking/index.js';
 import { resetWinkTrackingState } from './tracking/winkTracking.js';
 import { resetIrisTrackingState } from './tracking/irisTracking.js';
 import { cancelPursuitCalibration } from './calibration.js';
@@ -153,7 +153,6 @@ function applyTrackingTypeUI() {
   $('sheetMarginRow').classList.toggle('hidden', isWink);
   $('poseToggle').classList.toggle('hidden', isWink);
   refreshControlStates();
-  $('runBtn').disabled = !canFollow();
 }
 
 function saveSettings() { persistSettings(true); }
@@ -370,7 +369,7 @@ export function initSettingsUI() {
   $('poseToggle').onclick = () => {
     poseEntry.set(!state.usePose);
     state.calibrated = false; state.coefX = state.coefY = null; state.gnorm = null;
-    $('runBtn').disabled = true; refreshControlStates();
+    refreshControlStates();
     $('calibBtn').textContent = '🎯 Calibrate';
     cancelPursuitCalibration();
     setStatus('s-warn', 'mode changed — recalibrate');
