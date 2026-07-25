@@ -103,3 +103,98 @@ describe('looResiduals + calibrationQuality', () => {
     expect(quality.residuals).toEqual([]);
   });
 });
+
+// --- Many-samples-per-dot regime (item 1: feed every raw sample instead of --
+// collapsing a dot's ~550ms capture to one median row) --------------------
+
+// A small seeded PRNG (mulberry32) so these tests are fully deterministic —
+// no reliance on Math.random(), no possibility of a flaky CI failure from an
+// unlucky draw.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function gaussian(rng) {
+  // Box-Muller.
+  const u1 = Math.max(1e-9, rng()), u2 = rng();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+// Builds a many-sample-per-dot calibration set: for each of the 9 real grid
+// dots, `perPoint` noisy rows sharing that dot's pointId — the shape
+// runCalibration() now produces (one row per raw frame captured during the
+// dot's hold, not one median-collapsed row).
+function manySampleGrid(perPoint, noiseStd, seed) {
+  const rng = mulberry32(seed);
+  const rows = [];
+  let pointId = 0;
+  for (const sy of [0.12, 0.5, 0.88]) {
+    for (const sx of [0.1, 0.5, 0.9]) {
+      for (let i = 0; i < perPoint; i++) {
+        rows.push({
+          sx, sy, pointId,
+          rx: sx + gaussian(rng) * noiseStd,
+          ry: sy + gaussian(rng) * noiseStd,
+          bH: 0, bV: 0,
+        });
+      }
+      pointId++;
+    }
+  }
+  return rows;
+}
+
+describe('fitCalibration on many samples per dot (pointId grouping)', () => {
+  it('with exactly one row per point, is identical to the pre-existing behavior (ridge lambda unscaled)', () => {
+    // rows/points === 1 -> effectiveLambda is a no-op; this just re-confirms
+    // that adding `pointId` to already-singleton rows changes nothing.
+    const oneEach = grid9().map((p, i) => ({ ...p, rx: p.sx, ry: p.sy, bH: 0, bV: 0, pointId: i }));
+    const withIds = fitCalibration(oneEach);
+    const withoutIds = fitCalibration(grid9().map((p) => ({ ...p, rx: p.sx, ry: p.sy, bH: 0, bV: 0 })));
+    expect(withIds.coefX).toEqual(withoutIds.coefX);
+    expect(withIds.coefY).toEqual(withoutIds.coefY);
+  });
+
+  it('recovers a near-identity mapping from many noisy samples per dot', () => {
+    const rows = manySampleGrid(20, 0.02, 1);
+    const { gnorm, coefX, coefY } = fitCalibration(rows);
+    // Evaluate at the true (noiseless) grid locations, not the noisy training rows.
+    for (const p of grid9()) {
+      const clean = { ...p, rx: p.sx, ry: p.sy, bH: 0, bV: 0 };
+      expect(applyX(clean, coefX, gnorm)).toBeCloseTo(p.sx, 1);
+      expect(applyY(clean, coefY, gnorm)).toBeCloseTo(p.sy, 1);
+    }
+  });
+
+  it('leave-one-POINT-out excludes an entire dot\'s rows per refit, not one row', () => {
+    const rows = manySampleGrid(15, 0.01, 2);
+    const residuals = looResiduals(rows);
+    // One residual entry per distinct dot (9), not one per raw row (135).
+    expect(residuals).toHaveLength(9);
+  });
+
+  it('flags a dot whose entire sample cluster is corrupted, even amid many samples', () => {
+    const rows = manySampleGrid(15, 0.01, 3).map((r) => (
+      r.pointId === 4 ? { ...r, rx: r.rx + 0.4 } : r
+    ));
+    const quality = calibrationQuality(rows);
+    expect(quality.poor).toBe(true);
+    expect(quality.poorIndices).toContain(4);
+  });
+
+  it('does not treat "too few raw rows" as the LOO floor once dots contribute many rows each (checks distinct dots, not row count)', () => {
+    // Only 2 distinct dots, but 50 rows each -> still below the 4-dot floor.
+    const rows = [
+      ...Array.from({ length: 50 }, () => ({ sx: 0.1, sy: 0.1, rx: 0.1, ry: 0.1, bH: 0, bV: 0, pointId: 0 })),
+      ...Array.from({ length: 50 }, () => ({ sx: 0.9, sy: 0.9, rx: 0.9, ry: 0.9, bH: 0, bV: 0, pointId: 1 })),
+    ];
+    const quality = calibrationQuality(rows);
+    expect(quality.poor).toBe(false);
+    expect(quality.residuals).toEqual([]);
+  });
+});

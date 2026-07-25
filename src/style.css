@@ -169,6 +169,16 @@ summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .cdot.capturing { background: var(--warn); transform: scale(1.3); }
 .cdot.done { background: var(--good); }
 
+/* --- Smooth-pursuit calibration overlay (experimental, item 3) ------- */
+#pursuitCalib { position: fixed; inset: 0; background: rgba(5,8,12,0.92); z-index: 40; display: none; }
+#pursuitCalib .msg { position: absolute; top: 24px; left: 0; right: 0; text-align: center; color: var(--ink); font-size: 16px; }
+#pursuitCalib .msg small { color: var(--muted); display: block; margin-top: 4px; font-size: 13px; }
+/* No CSS transition on left/top (unlike #accdot below): position is already
+   updated every animation frame from the known trajectory, so a transition
+   would just add a second, redundant layer of lag on top of the target's own
+   already-continuous motion. */
+#pdot { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 8px rgba(76,201,240,0.15); }
+
 #empty { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; text-align: center; pointer-events: none; z-index: 1; }
 #toast { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--good); color: #04220a; padding: 8px 16px; border-radius: 8px; z-index: 30; font-weight: 600; opacity: 0; transition: opacity .2s; pointer-events: none; }
 #toast.show { opacity: 1; }

@@ -220,9 +220,125 @@ for `smoothX`/`smoothY`).
   that a real gaze jump through `decide()` tracks noticeably further in one frame than the old EMA
   would have.
 
+**(2026-07-24) Three speculative "next direction" ideas from a code review, investigated as a
+design-first session — one built (small, tested, off by default), two left as researched
+proposals.** This app has no automated way to measure interaction *feel*, so per the review's own
+framing, the goal was a well-argued small core over three half-built features. See
+`docs/personas/06-music-educator-advocate.md` for the target-audience lens applied throughout.
+
+- **Built: a "staff-position prior" in `decide()` — EXPERIMENTAL, off by default, no settings-panel
+  toggle wired up.** The idea: this app already knows exactly where the content is
+  (`systemCentersDoc`, from `detectSystems()`/`analyzeScore()`), which almost no general gaze
+  application can say about its own content — while genuinely reading, gaze is physically
+  constrained to be on or near a staff band. Implemented as a small, bounded, per-frame pull of the
+  post-One-Euro `smoothY` toward the nearest entry in `systemCentersDoc`, gated by a new optional
+  `staffPriorOn` input (default falsy/absent — every existing test in `followLogic.test.js` passes
+  completely unmodified with it, which is the direct proof this is a true no-op when off).
+  - **Two explicit, load-bearing safeguards**, both required reading before ever turning this on
+    for real use: (1) **capped reach** — only pulls when the nearest band is within one full
+    dead-zone's worth of screen distance (`deadUp + deadDown`, imported from `deadZoneBounds()`, not
+    re-derived — same "import the capped geometry" discipline as the wink-intent finding below).
+    A deliberate look-away far from any band, or off-sheet entirely, never reaches this code at all
+    (the existing `onSheetX`/`onScreenY` early-return already filters the off-sheet case; the reach
+    cap filters the on-sheet-but-nowhere-near-a-band case, e.g. glancing at the music stand). (2)
+    **gentle fractional pull** (`STAFF_PRIOR_PULL = 0.12` of the gap per frame), not a snap — same
+    leaky-convergence idiom as drift correction below, so even a wrongly-detected band can only bias
+    the estimate gradually, never relocate it in one frame.
+  - **How this differs from, and is meant to run alongside (not replace), the other two Y-axis
+    corrections already in `decide()`** — a review requirement, not just a nice-to-have, since
+    layering redundant smoothing would be a real bug in its own right: the One Euro filter smooths
+    the *raw signal in time* (removes frame-to-frame jitter, independent of content); this smooths
+    the *estimate against known content* (removes calibration bias, independent of gaze speed);
+    drift correction (further below) nudges a *persistent* `biasY` that feeds back upstream into
+    `irisTracking.js`'s calibration mapping for future raw samples, session over session — this
+    prior only touches the current frame's already-smoothed value used for zone classification and
+    carries no memory of its own beyond `smoothY` itself (no new `FollowState` field was needed).
+  - **Known, deliberately NOT resolved risks — this is exactly why it ships off by default**: it can
+    still mask genuine calibration drift on a page where detection is correct (making the accuracy
+    test look better than a real user's actual experience, since the accuracy test doesn't know to
+    penalize a prior quietly correcting for it); and it will confidently pull toward the wrong place
+    on a page where `detectSystems()` itself mis-detected the bands — neither risk is mitigated by
+    the two safeguards above, which only bound *how much* damage one frame can do, not whether the
+    prior is right to begin with. **A real webcam session is required to validate the actual feel**
+    (does the pull feel like "it reads my mind" or "it's fighting me") — this cannot be judged from
+    synthetic tests, which only prove the bounded/no-op/convergence *mechanics* are correct, not that
+    the idea is good in practice. To try it by hand: `state.staffPriorOn = true` in the browser
+    console (no UI checkbox exists yet — deliberately: per the music-educator persona's control-panel-
+    clutter findings, adding a settings-panel entry for a feature that hasn't cleared real-user
+    validation risks the exact "confusing choice surface mid-warm-up" failure mode already documented
+    there, for zero benefit until the idea is known to be good).
+  - Tests: `lib/followLogic.test.js`'s new `staff-position prior` describe block — no-op-when-absent
+    (byte-identical output, both implicit-absent and explicit-`false`), pulls toward a nearby band,
+    bounded to exactly one pull-fraction step even when the band is far enough to still be in reach,
+    excluded entirely once the band exceeds the capture radius (the look-away safeguard), monotonic
+    convergence over many frames with the raw signal held static (isolating the prior's own dynamics
+    from the independently-tested One Euro filter's), and a concrete "absorbs a small calibration
+    offset that would otherwise wrongly trigger a scroll" scenario contrasted directly against the
+    same input with the prior off. Full suite: 329 tests passing (was 303 before this session).
+
+- **Researched, NOT built: a reading-progression temporal/monotonicity model (idea 2).** The
+  literal ask — "you cannot jump from system 3 to system 7" — turns out to already be substantially
+  true in snap mode as it exists today: `systemCentersDoc.find((y) => y > bandDocY + 8)` (and its
+  reversed counterpart for retreat) only ever looks at the single *next* adjacent center in the
+  chosen direction, so a multi-system skip in one `decide()` call was never structurally possible to
+  begin with, independent of any new state machine. The genuine gap is smooth mode, which has no
+  system-index concept at all — but the concrete jitter risk that gap could cause (oscillating across
+  a zone boundary near a system edge from gaze noise) is already covered by the combination of the
+  One Euro filter (kills small jitter without adding lag to real saccades) and the hold-hysteresis
+  timer (`cfg.holdMs`, requires a *sustained* zone before committing) — both already validated,
+  neither new. **Declined to build a hard monotonicity/rejection layer** specifically because of the
+  tension the music-educator persona flagged: page-turn *back* (re-reading a passage) is a real,
+  legitimate action, and any naive "reject backward/implausible" gate risks fighting exactly that —
+  the snap-mode retreat path already handles it correctly (same hold-then-commit mechanics as
+  advance, just searching the reversed list), and a *general* rejection filter on top would need to
+  somehow distinguish "implausible noise" from "deliberate re-read," which is not obviously solvable
+  without more signal than a single gaze stream provides. If a future need arises (e.g. a HUD
+  "system N of M" readout), the cheap piece worth adding is a **read-only derived system-index
+  estimate** exposed from `decide()`'s existing nearest-center math — not a rejection/gating layer —
+  but there's no concrete consumer for it yet, so it wasn't built speculatively.
+
+- **Researched, NOT built: a more principled continuous/implicit recalibration (idea 3).** Drift
+  correction already exists and already *is* a conservative version of this idea: while `reading`
+  (in-band, not mid-turn — an implicit label that "this sample is probably near the band center"),
+  it nudges a single scalar `biasY` via a slow (`0.05`/frame decay), clamped (`±0.15`) leaky
+  integrator, which then feeds back into `irisTracking.js`'s calibration mapping for *future* raw
+  samples. A "more principled" version, as posed by the idea, would mean updating the actual fitted
+  calibration model (`state.coefX`/`coefY`, a per-axis quadratic gain/shape from `calibrationModel.js`,
+  not just a scalar offset) from the same implicitly-labeled in-band samples — e.g. a bounded online
+  regression update, not just a bias nudge. **Declined to build this**, for a stability reason the
+  task brief specifically asked to take seriously: any feedback loop that updates a model from its
+  own possibly-wrong predictions can compound rather than correct — and unlike the scalar `biasY`
+  nudge (which has a hard, tight clamp and a slow decay bounding its worst case to a small, fixed
+  offset), an online gain-model update has no comparably simple worst-case bound; a bad stretch of
+  implicitly-labeled samples (e.g. from a page where `detectSystems()` mis-detected bands, if idea 1's
+  prior or `systemCentersDoc` were ever used as part of the "confidently reading" gate) could
+  compound into a materially worse calibration than the one the user explicitly fit, with no simple
+  argument for why it can't. **The one thing that would make this safe to attempt**: the same
+  discipline the music-educator persona already required before green-lighting audio-following for
+  practice mode — record a real session (not synthetic input) and show the proposed update rule
+  produces a net-improving calibration more often than a net-worsening one, with a cheap, reliable
+  fallback (e.g. revert-to-explicit-calibration) for when it doesn't. No such recording/harness
+  exists for gaze-mapping quality today, so this stays a proposal, not a build.
+- **A real, worth-flagging interaction risk between ideas 1 and 3, if idea 3 (or anything like it)
+  is ever attempted later:** idea 1's staff-position prior already writes a possibly-wrong,
+  detection-dependent nudge into `smoothY` every frame it's enabled. If a future recalibration
+  scheme (idea 3) were ever built to learn from "confidently reading" samples, and those samples
+  were the *already-nudged* `smoothY` rather than the pre-prior estimate, a wrongly-detected page
+  could corrupt not just one frame's classification (idea 1's own, already-documented risk) but the
+  persisted calibration model itself, in a way that would survive past that one page. Any future
+  idea-3 attempt must feed from a `smoothY` that has NOT gone through idea 1's prior, or must treat
+  the two as mutually exclusive — this compounding-corruption path doesn't exist today (idea 3
+  wasn't built), but would be a designed-in requirement, not an afterthought, the moment it is.
+
 **Open questions / future research:**
 - Whether snap-mode's fixed `dt*6` easing rate should itself be user-tunable (currently baked in)
   — no reported user complaints yet, so untouched.
 - Horizontal (X-axis) dead-zone/hysteresis tuning has had less real-world testing than the
   vertical band logic; worth a dedicated accuracy pass if line-end detection complaints come in.
+- The staff-position prior (above) needs real-webcam validation before any UI toggle is added —
+  next step for whoever picks this up is trying `state.staffPriorOn = true` against a real page and
+  judging the feel, not further synthetic testing (the mechanics are already covered).
+- A read-only "current system index" derived signal (see idea 2 above) would be cheap to add from
+  existing snap-mode math if a concrete consumer (HUD readout, another feature) ever wants it —
+  no consumer exists yet.
 

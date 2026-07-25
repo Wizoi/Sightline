@@ -33,14 +33,57 @@ export function eyeOpen(lm, up, lo, outer, inner) {
   return Math.hypot(lm[lo].x - lm[up].x, lm[lo].y - lm[up].y) / w;
 }
 
+// Confidence-weighted combination of the two eyes' signals, replacing a flat
+// (L+R)/2 average. A weight pair of {left:1, right:1} (the default) reduces
+// to exactly that flat average — the identity case this must always degrade
+// to when both eyes are equally trustworthy — so every existing call site
+// that doesn't pass weights is completely unaffected.
+function wavg(l, r, wl, wr) {
+  const wsum = wl + wr || 1;
+  return (l * wl + r * wr) / wsum;
+}
+
+// Never fully zero out an eye's contribution, even when its confidence weight
+// says "trust it much less right now": a single eye's own gaze estimate is
+// itself noisier than a blend of two (it loses whatever independent-noise
+// averaging a blend gives you), so a momentary bad reading from the
+// *confidence signal itself* (e.g. a one-frame blendshape glitch) can't swing
+// all the way to a pure single-eye estimate.
+const MIN_EYE_WEIGHT = 0.1;
+
+// Derives a per-eye confidence weight from MediaPipe's eyeBlinkLeft/Right
+// blendshape scores (the same purpose-built, model-normalized closure signal
+// already used for wink/blink gating — see eyeBlinkScores below) rather than
+// from raw eyelid-landmark geometry. This matters here for the same reason it
+// mattered for blink gating: a person's two eyes are rarely perfectly
+// symmetric even at rest (see winkLogic.js's per-user gap-threshold write-up
+// in the Applied Math persona doc), so a confidence signal built from raw,
+// person-specific anatomy (e.g. plain eyelid-gap ratio) would systematically
+// and *permanently* down-weight whichever eye is naturally narrower at rest —
+// exactly the "normal asymmetry at rest" failure mode this must not
+// introduce. The blink blendshape is a model-fit "how closed is this eye"
+// classifier score that already accounts for per-face anatomy much better
+// than raw pixel geometry, so ordinary rest-state asymmetry between two
+// otherwise-fine eyes shows up as only a small gap between two already-small
+// scores (e.g. 0.08 vs 0.12) — barely nudging the resulting weights off
+// 50/50 — while a real problem (glasses glare, an occluding head turn, a
+// partial closure) reliably drives one eye's score up much more than the
+// other's, which is exactly when down-weighting that eye is wanted.
+export function eyeConfidence(left, right) {
+  return { left: Math.max(MIN_EYE_WEIGHT, 1 - left), right: Math.max(MIN_EYE_WEIGHT, 1 - right) };
+}
+
 // Gaze features: pose-invariant yaw/pitch (usePose) OR 2D width-normalized
-// iris ratios. Plus eye openness (for blink gating).
-export function eyeRatios(lm, usePose, w, h) {
+// iris ratios. Plus eye openness (for blink gating). `weights` (from
+// eyeConfidence, above) lets a caller down-weight whichever eye currently
+// looks less trustworthy instead of always splitting 50/50.
+export function eyeRatios(lm, usePose, w, h, weights = { left: 1, right: 1 }) {
   const open = (eyeOpen(lm, 159, 145, 33, 133) + eyeOpen(lm, 386, 374, 263, 362)) / 2;
+  const wl = weights.left ?? 1, wr = weights.right ?? 1;
   if (usePose) {
     const B = headBasis(lm, w, h);
     const L = eyeGaze(lm, 468, 33, 133, B, w, h), R = eyeGaze(lm, 473, 263, 362, B, w, h);
-    return { rx: (L.yaw + R.yaw) / 2, ry: (L.pitch + R.pitch) / 2, open };
+    return { rx: wavg(L.yaw, R.yaw, wl, wr), ry: wavg(L.pitch, R.pitch, wl, wr), open };
   }
   const one = (iris, outer, inner) => {
     const cx = (lm[outer].x + lm[inner].x) / 2, cy = (lm[outer].y + lm[inner].y) / 2;
@@ -48,19 +91,21 @@ export function eyeRatios(lm, usePose, w, h) {
     return { rx: (lm[iris].x - cx) / eyeW, ry: (lm[iris].y - cy) / eyeW };
   };
   const L = one(468, 33, 133), R = one(473, 263, 362);
-  return { rx: (L.rx + R.rx) / 2, ry: (L.ry + R.ry) / 2, open };
+  return { rx: wavg(L.rx, R.rx, wl, wr), ry: wavg(L.ry, R.ry, wl, wr), open };
 }
 
-// Eye-look blendshape signals (pose-normalized by the model) — extra features.
-export function blendVec(res) {
+// Eye-look blendshape signals (pose-normalized by the model) — extra
+// features. Same confidence-weighting as eyeRatios, same default no-op.
+export function blendVec(res, weights = { left: 1, right: 1 }) {
   const cats = res.faceBlendshapes && res.faceBlendshapes[0] && res.faceBlendshapes[0].categories;
   if (!cats) return { bH: 0, bV: 0 };
   const g = {};
   for (const c of cats) g[c.categoryName] = c.score;
-  const up = ((g.eyeLookUpLeft || 0) + (g.eyeLookUpRight || 0)) / 2;
-  const dn = ((g.eyeLookDownLeft || 0) + (g.eyeLookDownRight || 0)) / 2;
-  const inn = ((g.eyeLookInLeft || 0) + (g.eyeLookInRight || 0)) / 2;
-  const out = ((g.eyeLookOutLeft || 0) + (g.eyeLookOutRight || 0)) / 2;
+  const wl = weights.left ?? 1, wr = weights.right ?? 1;
+  const up = wavg(g.eyeLookUpLeft || 0, g.eyeLookUpRight || 0, wl, wr);
+  const dn = wavg(g.eyeLookDownLeft || 0, g.eyeLookDownRight || 0, wl, wr);
+  const inn = wavg(g.eyeLookInLeft || 0, g.eyeLookInRight || 0, wl, wr);
+  const out = wavg(g.eyeLookOutLeft || 0, g.eyeLookOutRight || 0, wl, wr);
   return { bH: out - inn, bV: dn - up };
 }
 

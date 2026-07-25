@@ -3,7 +3,7 @@ import { state } from './appState.js';
 import { $, toast, setStatus, showRecalBanner, hideRecalBanner, applyBand } from './ui.js';
 import { loadPdf, renderAll } from './pdf.js';
 import { startCamera } from './camera.js';
-import { runCalibration, recenter, currentFingerprint } from './calibration.js';
+import { runCalibration, runPursuitCalibration, recenter, currentFingerprint } from './calibration.js';
 import { calibMismatch } from './lib/calibrationModel.js';
 import { runAccuracyTest, beginAccuracySequence } from './accuracyTest.js';
 import { runWinkCalibration, beginWinkCalibrationSequence } from './winkCalibrate.js';
@@ -30,6 +30,7 @@ $('file').onchange = (e) => {
 };
 $('camBtn').onclick = startCamera;
 $('calibBtn').onclick = runCalibration;
+$('pursuitCalibBtn').onclick = runPursuitCalibration;
 $('runBtn').onclick = () => {
   const turningOn = !state.following;
   // Eye/wink tracking and time-based Auto-scroll are alternatives, not
@@ -58,7 +59,7 @@ $('recalDismiss').onclick = hideRecalBanner;
 // Foot pedal / mouse click anywhere on the score = pause toggle
 // (clicks on the control panel and overlays are ignored).
 document.addEventListener('mousedown', (e) => {
-  if (e.target.closest && e.target.closest('#panel, #calib, #acctest, #accres, #winkTest, #winkTestRes, #recal')) return;
+  if (e.target.closest && e.target.closest('#panel, #calib, #pursuitCalib, #acctest, #accres, #winkTest, #winkTestRes, #recal')) return;
   if (!$('runBtn').disabled) $('runBtn').click();
 });
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {

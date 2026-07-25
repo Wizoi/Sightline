@@ -30,6 +30,13 @@ export const state = {
   showSys: false,
   driftOn: false,
   snapOn: false,
+  // EXPERIMENTAL "staff-position prior" (lib/followLogic.js decide()) — off by
+  // default, no settings-panel toggle yet. Deliberately left console-only
+  // (`state.staffPriorOn = true`) pending real-webcam validation of the feel;
+  // see docs/personas/05-realtime-control-engineer.md for the design, the
+  // bounded safeguards, and the known unresolved risks (masking real drift,
+  // confidently pulling toward a wrongly-detected band).
+  staffPriorOn: false,
 
   trackingType: 'wink',
   winkStrength: 0.5,

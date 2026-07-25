@@ -42,6 +42,7 @@
     <select id="trackingType"></select>
     <button id="camBtn">🎥 Start camera</button>
     <button id="calibBtn" disabled>🎯 Calibrate</button>
+    <button id="pursuitCalibBtn" disabled title="Experimental alternative: follow one moving dot for ~10s instead of clicking 9 fixed points">👀 Pursuit calibration (experimental)</button>
     <button id="testBtn" disabled>📏 Check accuracy</button>
     <div id="winkStrengthRow">
       <label for="ws">Wink scroll strength <span class="val" id="wsv"></span></label>
@@ -187,6 +188,11 @@
 
 <div id="calib">
   <div class="msg">Look at each red dot and click it <b>once</b>, holding your gaze until it turns green.<small>Do this in your real playing position. The overlay closes itself when all nine are green.</small></div>
+</div>
+
+<div id="pursuitCalib">
+  <div class="msg">Follow the moving dot smoothly with your eyes — don't look away — for about 10 seconds.<small>Experimental alternative to the 9-point Calibrate above. Do this in your real playing position.</small></div>
+  <div id="pdot"></div>
 </div>
 
 <div id="acctest">

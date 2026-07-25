@@ -85,11 +85,20 @@ export function deadZoneBounds(cfg, H) {
   };
 }
 
+// Gentle per-frame pull (fraction of the gap toward the nearest known staff
+// band) applied by the staff-position prior below — see the long comment at
+// its call site for what this is and, importantly, why it's bounded and
+// off by default. Small and fixed for the same reason ONE_EURO_BETA is: one
+// more exposed knob than a band-student user needs, and this is still an
+// unvalidated (real-webcam-untested) idea, not a shipped tuning surface.
+const STAFF_PRIOR_PULL = 0.12;
+
 // input: {
 //   now, dt, cfg, biasY,
 //   rawGaze: { x, y, t } | null,
 //   winkIntent: { dir: -1 | 1, strength: 0..1, t } | null,
 //   driftOn, snapOn, systemCentersDoc: number[],
+//   staffPriorOn: boolean | undefined,
 //   scrollY, docMax, viewportW, viewportH,
 // }
 // returns: {
@@ -119,7 +128,7 @@ export function deadZoneBounds(cfg, H) {
 export function decide(state, input) {
   const {
     now, dt, cfg, rawGaze, winkIntent, driftOn, snapOn, systemCentersDoc,
-    scrollY, docMax, viewportW: W, viewportH: H,
+    staffPriorOn, scrollY, docMax, viewportW: W, viewportH: H,
   } = input;
   let { smoothX, smoothY, dX, dY, snapTarget, curZone, zoneSince, scrollCarry } = state;
   let biasY = input.biasY;
@@ -223,6 +232,62 @@ export function decide(state, input) {
   smoothY = yStep.value; dY = yStep.deriv;
 
   const { center, deadUp, deadDown } = deadZoneBounds(cfg, H);
+
+  // Staff-position prior (EXPERIMENTAL, opt-in via staffPriorOn, off by
+  // default — no UI toggle wired up yet; see docs/personas/05-realtime-control-engineer.md).
+  // This app already knows, from detectSystems()/analyzeScore(), exactly
+  // where every staff sits on the page (systemCentersDoc) — while genuinely
+  // reading, gaze can't be anywhere but on or near one of those bands. This
+  // gently pulls the *current frame's* smoothed Y toward the nearest known
+  // band, absorbing small vertical calibration error "for free," in a way
+  // that's structurally different from — and meant to run alongside, not
+  // replace — the two other Y-axis corrections already in this function:
+  //   - the One Euro filter above smooths the *raw signal in time* (removes
+  //     frame-to-frame jitter); this smooths the *estimate against known
+  //     content* (removes calibration bias), a different axis entirely.
+  //   - drift correction (below) nudges a persistent `biasY` that feeds back
+  //     into the upstream calibration mapping (irisTracking.js) for *future*
+  //     raw samples, session-to-session; this only adjusts *this frame's*
+  //     already-smoothed value used for zone classification — it carries no
+  //     memory of its own beyond smoothY itself (no new FollowState field).
+  // Two deliberate, bounded safeguards, both required reading before turning
+  // this on for real use:
+  //   1. Capped reach: only pulls when the nearest band is within one full
+  //      dead-zone's reach (deadUp + deadDown) of the current estimate — the
+  //      same "plausible resting deviation" region the dead zone itself
+  //      already defines. A deliberate look-away (gaze off-sheet or far off
+  //      the vertical reading range) never reaches here at all, since the
+  //      onSheetX/onScreenY check above already returned early for those; a
+  //      look-away *within* on-screen bounds but far from any known band
+  //      (e.g. glancing at the music stand) is still excluded by this reach
+  //      cap, so it can't be yanked toward a staff the user isn't looking at.
+  //   2. Gentle, fractional pull (STAFF_PRIOR_PULL), not a snap: converges
+  //      toward the band exponentially over several frames, same idiom as
+  //      drift correction's leaky integrator, so it can never move the
+  //      estimate further in one frame than a small fraction of the (already
+  //      capped) gap — it cannot instantly relocate gaze to a wrong band even
+  //      when detection itself is wrong, only gradually bias toward it.
+  // Known, NOT-yet-resolved risks (see persona doc for the full discussion):
+  // this can still mask genuine calibration drift on a page where detection
+  // is correct (making the accuracy test look better than a real user's
+  // experience), and will confidently pull toward the wrong place if
+  // detectSystems() itself mis-detected the bands on a given page — neither
+  // is mitigated by the two safeguards above, which only bound *how much*
+  // damage a single frame can do, not whether the prior is right to begin
+  // with. This is why it ships off by default pending real-webcam validation.
+  if (staffPriorOn && systemCentersDoc && systemCentersDoc.length) {
+    const gazeDocY = scrollY + smoothY;
+    let nearestDocY = systemCentersDoc[0];
+    for (const y of systemCentersDoc) {
+      if (Math.abs(y - gazeDocY) < Math.abs(nearestDocY - gazeDocY)) nearestDocY = y;
+    }
+    const delta = (nearestDocY - scrollY) - smoothY; // screen-space gap to nearest band
+    const captureRadius = deadUp + deadDown;
+    if (Math.abs(delta) <= captureRadius) {
+      smoothY += STAFF_PRIOR_PULL * delta;
+    }
+  }
+
   const offset = smoothY - center;
   const inBand = offset >= -deadUp && offset <= deadDown;
   const rightBound = W * (1 - cfg.sheetMargin);

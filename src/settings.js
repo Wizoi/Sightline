@@ -6,6 +6,7 @@ import { repositionAutoScroll } from './autoScrollController.js';
 import { setCameraZoom } from './camera.js';
 import { TRACKING_TYPES, getActiveTracking, setTrackingType, canFollow } from './tracking/index.js';
 import { resetWinkTrackingState } from './tracking/winkTracking.js';
+import { cancelPursuitCalibration } from './calibration.js';
 
 const SETTINGS_KEY = 'eyepagescroller.settings';
 const PRESETS_KEY = 'eyepagescroller.presets';
@@ -141,6 +142,7 @@ function applyTrackingTypeUI() {
   const isWink = state.trackingType === 'wink';
   const needsCalib = getActiveTracking().needsCalibration;
   $('calibBtn').style.display = needsCalib ? '' : 'none';
+  $('pursuitCalibBtn').style.display = needsCalib ? '' : 'none';
   $('testBtn').style.display = needsCalib ? '' : 'none';
   $('winkStrengthRow').classList.toggle('hidden', !isWink);
   $('smoothnessRow').classList.toggle('hidden', isWink);
@@ -319,6 +321,7 @@ export function initSettingsUI() {
     // gets hidden — it would just sit there, invisible only for as long as
     // some higher-z-index overlay happened to be covering it.
     $('calib').style.display = 'none';
+    cancelPursuitCalibration();
     resetWinkTrackingState();
     $('calibBtn').textContent = '🎯 Calibrate';
     setStatus('s-warn', getActiveTracking().needsCalibration ? 'tracking type changed — recalibrate' : 'tracking type changed — ready to follow');
@@ -366,6 +369,7 @@ export function initSettingsUI() {
     state.calibrated = false; state.coefX = state.coefY = null; state.gnorm = null;
     $('runBtn').disabled = true; $('testBtn').disabled = true;
     $('calibBtn').textContent = '🎯 Calibrate';
+    cancelPursuitCalibration();
     setStatus('s-warn', 'mode changed — recalibrate');
     toast('Recalibrate for ' + (state.usePose ? 'head-pose' : 'basic') + ' mode');
   };

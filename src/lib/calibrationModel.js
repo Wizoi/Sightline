@@ -1,5 +1,49 @@
-import { mean, stddev } from './mathUtils.js';
+import { mean, stddev, median } from './mathUtils.js';
 import { lstsqRidge } from './linearAlgebra.js';
+
+// Groups calibPoints by the physical dot they came from. `pointId` is set by
+// runCalibration() (src/calibration.js) when it now feeds every raw sample of
+// a 550ms dot-capture as its own row instead of collapsing them to one
+// median row (see fitCalibration's doc comment below) — but any caller that
+// still passes one row per point (no pointId, e.g. this file's own tests,
+// which predate that change) gets exactly the old behavior: each row is
+// treated as its own singleton group, by falling back to its array index as
+// the group key. This is what makes every function below fully backward
+// compatible with 9-rows-in, 9-rows-out callers.
+function groupIndices(calibPoints) {
+  const map = new Map();
+  calibPoints.forEach((p, i) => {
+    const key = p.pointId !== undefined && p.pointId !== null ? `id:${p.pointId}` : `row:${i}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(i);
+  });
+  return [...map.values()];
+}
+
+// Ridge lambda was hand-tuned (0.05) for the original regime of exactly one
+// (already-denoised, median-collapsed) row per calibration dot. Feeding every
+// raw sample of a dot's ~550ms capture instead (hundreds of rows for the same
+// 9 physical points) changes what that lambda means: ridge solves
+// (X^T X + lambda*I) beta = X^T y, and X^T X scales ~linearly with row count,
+// so a *fixed* lambda's regularization strength relative to the data term
+// dilutes by roughly (rows-per-point) if left unscaled — silently making the
+// fit progressively less regularized as more samples are captured per dot
+// (e.g. from a higher-framerate camera), for no principled reason. Scaling
+// lambda by (total rows / number of distinct calibration points) keeps the
+// regularization-to-data-fit ratio the same as it was in the original
+// 1-row-per-point regime that 0.05 was chosen for, whatever the sample count
+// turns out to be — so this is a correctness fix for the *new* many-samples
+// regime, not a re-tune of the constant itself. (Derivation: m near-duplicate
+// noisy measurements of the same point make X^T X ~= m * X0^T X0, so solving
+// with lambda gives the same beta as solving the single-measurement-per-point
+// problem with lambda/m — scaling lambda by m up front restores the original
+// per-point regularization strength.) With exactly one row per point (the old
+// callers, and this file's own tests), rows/points == 1 and this is a no-op.
+function effectiveLambda(calibPoints, ridgeLambda) {
+  const groups = groupIndices(calibPoints);
+  if (!groups.length) return ridgeLambda;
+  return ridgeLambda * (calibPoints.length / groups.length);
+}
 
 // Gaze model: quadratic in standardized (rx,ry) + a linear blendshape term,
 // fit separately for the X and Y screen axes. Standardization keeps the fit
@@ -25,8 +69,14 @@ export function dotv(c, f) {
 export function applyX(p, coefX, gnorm) { return dotv(coefX, featX(stdz(p, gnorm))); }
 export function applyY(p, coefY, gnorm) { return dotv(coefY, featY(stdz(p, gnorm))); }
 
-// Fits gnorm/coefX/coefY from a set of 9(+)-point calibration samples, each
-// shaped like { sx, sy, rx, ry, bH, bV } (sx/sy = target screen fraction).
+// Fits gnorm/coefX/coefY from a set of calibration samples, each shaped like
+// { sx, sy, rx, ry, bH, bV, pointId? } (sx/sy = target screen fraction).
+// `pointId` (which physical dot a row came from) is optional: pass it when
+// feeding every raw sample of a dot's capture window rather than one
+// median-collapsed row per dot, so LOO/lambda-scaling above can tell which
+// rows belong together. ridgeLambda is scaled per effectiveLambda's doc
+// comment; pass a pre-scaled lambda of your own via the same parameter if
+// you need to bypass that (rows/points == 1 keeps it a no-op regardless).
 export function fitCalibration(calibPoints, ridgeLambda = 0.05) {
   const col = (k) => calibPoints.map((p) => p[k]);
   const gnorm = {
@@ -39,29 +89,57 @@ export function fitCalibration(calibPoints, ridgeLambda = 0.05) {
     ],
   };
   const zs = calibPoints.map((p) => stdz(p, gnorm));
-  const coefX = lstsqRidge(zs.map(featX), col('sx'), ridgeLambda);
-  const coefY = lstsqRidge(zs.map(featY), col('sy'), ridgeLambda);
+  const lambda = effectiveLambda(calibPoints, ridgeLambda);
+  const coefX = lstsqRidge(zs.map(featX), col('sx'), lambda);
+  const coefY = lstsqRidge(zs.map(featY), col('sy'), lambda);
   return { gnorm, coefX, coefY };
 }
 
-// Leave-one-out residuals: refits the model once per point with that point
-// excluded, then measures how far the excluded point's own (rx,ry,bH,bV)
-// predicts from where it was actually clicked (sx,sy). This is a genuine
-// generalization check (unlike the fit's own training residual, which a
-// 7-parameter model on ~9 points can nearly always drive to ~0 regardless of
-// whether the fit is any good off-sample) — cheap here only because 9 points
-// means 9 cheap refits, not because the method is approximate.
+// Leave-one-POINT-out residuals: refits the model once per *physical
+// calibration dot* with every one of that dot's rows excluded (not just one
+// row), then measures how far that dot's own held-out readings predict from
+// where it was actually clicked (sx,sy). This is a genuine generalization
+// check (unlike the fit's own training residual, which a 7-parameter model
+// can nearly always drive to ~0 regardless of whether the fit is any good
+// off-sample) — cheap here only because a handful of dots means a handful of
+// refits, not because the method is approximate.
+//
+// Grouping by dot (via groupIndices, keyed on `pointId` when present) rather
+// than by row is deliberate, not incidental, now that a dot can contribute
+// many rows: leaving out a single *sample* of a dot the model has otherwise
+// seen dozens of near-identical rows from would barely move the fit at all
+// and would say nothing about generalizing to a genuinely new fixation —
+// it'd mostly just be re-measuring how well the model fits data it has
+// already memorized. Leaving out the whole dot is the only version of this
+// test that still means "how well would this model have predicted a point it
+// never saw," which is the entire reason A3 introduced LOO in the first
+// place. Backward compatible: with the original one-row-per-dot input (no
+// pointId — every existing caller/test before this change), each group is a
+// singleton and this reduces to exactly the old per-row LOO.
 export function looResiduals(calibPoints, ridgeLambda = 0.05) {
+  const groups = groupIndices(calibPoints);
   const out = [];
-  for (let i = 0; i < calibPoints.length; i++) {
-    const held = calibPoints[i];
-    const rest = calibPoints.slice(0, i).concat(calibPoints.slice(i + 1));
+  groups.forEach((idxs, gi) => {
+    const heldSet = new Set(idxs);
+    const rest = calibPoints.filter((_, i) => !heldSet.has(i));
     const { gnorm, coefX, coefY } = fitCalibration(rest, ridgeLambda);
+    const rows = idxs.map((i) => calibPoints[i]);
+    // Representative held-out reading: median across this dot's own rows
+    // (all rows in a group share the same sx/sy target already) — the same
+    // per-dot summary runCalibration() used to compute up front, just
+    // computed here instead of baked into the stored calibration data.
+    const held = {
+      sx: rows[0].sx, sy: rows[0].sy,
+      rx: median(rows.map((r) => r.rx)),
+      ry: median(rows.map((r) => r.ry)),
+      bH: median(rows.map((r) => r.bH || 0)),
+      bV: median(rows.map((r) => r.bV || 0)),
+    };
     const px = applyX(held, coefX, gnorm);
     const py = applyY(held, coefY, gnorm);
     const dx = px - held.sx, dy = py - held.sy;
-    out.push({ index: i, dx, dy, dist: Math.hypot(dx, dy) });
-  }
+    out.push({ index: gi, pointId: rows[0].pointId, dx, dy, dist: Math.hypot(dx, dy) });
+  });
   return out;
 }
 
@@ -84,12 +162,15 @@ export function gridSpacingThreshold(calibPoints) {
 
 // Summarizes LOO quality for a just-completed calibration: which points (if
 // any) the model fails to generalize to, and whether that's bad enough to
-// warrant a proactive recalibration prompt. Needs at least 4 points for LOO
-// refits to be meaningful at all (below that, holding one out leaves too few
-// points for the refit itself to mean anything) — real 9-point calibrations
-// are always well above this floor; it only guards a pathological caller.
+// warrant a proactive recalibration prompt. Needs at least 4 distinct
+// physical DOTS for LOO refits to be meaningful at all (below that, holding
+// one out leaves too few points for the refit itself to mean anything) —
+// real 9-point calibrations are always well above this floor; it only guards
+// a pathological caller. Checked on group count, not raw row count: once a
+// dot can contribute many sample rows, `calibPoints.length` alone no longer
+// says anything about how many distinct points were actually calibrated.
 export function calibrationQuality(calibPoints, ridgeLambda = 0.05) {
-  if (!calibPoints || calibPoints.length < 4) {
+  if (!calibPoints || groupIndices(calibPoints).length < 4) {
     return { residuals: [], worst: 0, worstIndex: -1, threshold: 0, poorIndices: [], poor: false };
   }
   const residuals = looResiduals(calibPoints, ridgeLambda);

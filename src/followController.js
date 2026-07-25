@@ -17,6 +17,7 @@ function tick(now) {
     rawGaze: state.rawGaze,
     winkIntent: state.winkIntent,
     driftOn: state.driftOn, snapOn: state.snapOn, systemCentersDoc: state.systemCentersDoc,
+    staffPriorOn: state.staffPriorOn,
     scrollY: window.scrollY,
     docMax: Math.max(0, document.documentElement.scrollHeight - window.innerHeight),
     viewportW: window.innerWidth, viewportH: window.innerHeight,

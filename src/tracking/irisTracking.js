@@ -1,5 +1,5 @@
 import { state } from '../appState.js';
-import { eyeRatios, blendVec, eyeBlinkScores } from '../lib/gazeMath.js';
+import { eyeRatios, blendVec, eyeBlinkScores, eyeConfidence } from '../lib/gazeMath.js';
 import { applyX, applyY } from '../lib/calibrationModel.js';
 
 export const id = 'iris';
@@ -24,13 +24,27 @@ const BLINK_THRESHOLD = 0.3;
 // fitted calibration model. Returns unclamped screen-fraction coordinates, or
 // null if there's nothing to report yet (blinking, or not calibrated).
 export function onFrame(lm, res, procW, procH) {
-  const r = eyeRatios(lm, state.usePose, procW, procH);
-  const b = blendVec(res); r.bH = b.bH; r.bV = b.bV;
-
   const { left, right } = eyeBlinkScores(res);
   if (Math.max(left, right) > BLINK_THRESHOLD) return null;
 
-  if (state.capturing) state.capturing.samples.push(r);
+  // Per-eye confidence weighting (lib/gazeMath.js's eyeConfidence): reuses
+  // the same blink scores already computed for the gate above, so this is a
+  // pure signal-reuse, not an extra cost. Below the hard blink-gate
+  // threshold both eyes are "open enough to trust" in the binary sense, but
+  // one can still be more closed/occluded (glasses glare, a head turn) than
+  // the other — down-weighting it in the average is strictly finer-grained
+  // than the all-or-nothing gate above, and degrades to today's flat 50/50
+  // average whenever both eyes score similarly (the common case).
+  const weights = eyeConfidence(left, right);
+  const r = eyeRatios(lm, state.usePose, procW, procH, weights);
+  const b = blendVec(res, weights); r.bH = b.bH; r.bV = b.bV;
+
+  // `t` (capture time) rides along unused by the 9-dot flow (it only ever
+  // reads rx/ry/bH/bV off each pushed sample) but is what lets the
+  // smooth-pursuit flow (calibration.js's runPursuitCalibration) recover
+  // *when* during its ~10s sweep each sample was captured, so it can pair
+  // each one against the moving target's position at that instant.
+  if (state.capturing) state.capturing.samples.push({ ...r, t: performance.now() });
 
   if (!(state.calibrated && state.coefX && state.coefY)) return null;
 

@@ -138,12 +138,118 @@ just an open question, since this was a real two-thread research spike, not idle
   than a real server origin, worth remembering for any future ad hoc browser-capability testing
   page, not just this one.)
 
+**Per-eye confidence weighting, shipped (2026-07-24) — replaces the unconditional `(L+R)/2`
+flat average in both gaze-angle and eye-look-blendshape combination.**
+- **The gap this closes:** `gazeMath.js`'s `eyeRatios`/`blendVec` averaged the two eyes
+  unconditionally. If one eye is compromised (glasses glare, a head turn partially occluding it,
+  a partial closure not severe enough to trip the hard blink gate), its degraded reading pulled
+  the combined gaze estimate exactly as hard as the good eye's — silent, ungraded degradation
+  instead of favoring whichever eye is actually trustworthy right now.
+- **What was built:** `eyeConfidence(left, right)` in `gazeMath.js` derives a per-eye weight from
+  the SAME `eyeBlinkLeft`/`eyeBlinkRight` blendshape scores already computed for the hard blink
+  gate (pure signal reuse, no extra per-frame cost): `weight = max(MIN_EYE_WEIGHT, 1 - blinkScore)`,
+  floored (never fully zeroed) so a single bad confidence reading can't swing all the way to a
+  pure single-eye estimate. `eyeRatios`/`blendVec` both take an optional `weights` parameter
+  (default `{left:1, right:1}`, which is *exactly* the old flat average — every existing call
+  site that doesn't pass weights is unaffected) and combine via a weighted mean instead of a
+  plain one. `irisTracking.js`'s `onFrame` computes the blink scores once (as it already did for
+  the gate), derives weights, and passes them to both.
+- **Why blendshapes, not raw eyelid-landmark geometry, as the confidence signal — deliberately
+  the opposite of what you might reach for first:** raw per-eye lid-gap ratio is anatomy-specific
+  (a person's two eyes are rarely symmetric even at rest — see the wink-calibration work above and
+  the Applied Math persona's per-user gap-threshold write-up), so a confidence weight built from
+  raw geometry would *permanently* down-weight whichever eye is naturally narrower at rest, not
+  just when something is actually wrong. The blink blendshape is a model-fit "how closed is this
+  eye" score that already accounts for per-face anatomy far better than raw pixel geometry, so
+  ordinary rest-state asymmetry (e.g. 0.08 vs 0.12) barely nudges the weights off 50/50, while a
+  real problem (glare, occlusion, partial closure) drives one eye's score up much more than the
+  other's — which is exactly when down-weighting it is wanted. Confirmed via unit tests
+  (`gazeMath.test.js`) at both ends: near-equal scores stay within a ~48-52% band of 50/50; a
+  clearly-elevated score (0.28 vs 0.05, still under the hard 0.3 blink gate) shifts weight to
+  under 45/55.
+- **Verified:** 10 new colocated unit tests in `gazeMath.test.js` covering `eyeConfidence` in
+  isolation and the weighted `eyeRatios`/`blendVec` combination (default-weights identity, equal
+  weights matching the flat average, down-weighting pulling the result toward the trusted eye, and
+  pose-mode too) — plus the existing `irisTracking.test.js` suite (all still pass unchanged, since
+  its synthetic landmark rig is eye-symmetric and both flows reduce to the same value there). Full
+  suite green (351 tests total after this + the other two items in this round).
+- **What's NOT verified, and can't be without a live session:** this is exactly the kind of change
+  the task brief predicted can't be confirmed headlessly — no real glasses glare, real asymmetric
+  partial closure, or real head-turn-occlusion was tested against a live camera. The math is
+  provably conservative (degrades to today's exact behavior when both eyes score equally, per the
+  unit tests), but whether it *measurably* helps in an actual glare/occlusion scenario is an open,
+  real-user question for whoever next has a webcam and a pair of glasses on hand.
+
+**Smooth-pursuit calibration, shipped as an experimental alternative alongside the 9-dot flow
+(2026-07-24) — see `src/lib/pursuitCalibration.js`, jointly documented here and in the Applied
+Math persona doc (the fitting/lag-estimation math is that persona's territory; the UI/capture
+wiring below is this one's).**
+- **What it is:** instead of clicking 9 fixed dots, the user follows one continuously-moving
+  target (a Lissajous path, bounded to the same safe screen margins as the 9-dot grid) for ~10s.
+  `calibration.js`'s new `runPursuitCalibration()` reuses the exact same `state.capturing`
+  mechanism the 9-dot flow already used to collect raw per-frame samples — `irisTracking.js` now
+  stamps each captured sample with `t: performance.now()` (harmless extra field for the 9-dot flow,
+  which never reads it) specifically so the pursuit flow can recover *when* each sample was
+  captured relative to the sweep's own start, which it needs to pair each sample against the
+  target's position at that instant.
+- **Wired as a genuine, real option, not a stub:** a new `👀 Pursuit calibration (experimental)`
+  button (shown/hidden and enabled/disabled in lockstep with the existing `Calibrate` button — same
+  `needsCalibration`/camera-ready gating in `settings.js`/`camera.js`), a dedicated `#pursuitCalib`
+  overlay with a smoothly-moving `#pdot` target, and a `cancelPursuitCalibration()` escape hatch
+  wired into both of the two places that already reset in-progress-calibration state on a mode
+  switch (tracking-type change, head-pose toggle) — a mid-sweep switch away doesn't leave the
+  overlay stuck open or the button permanently unresponsive.
+- **On finish, the fitted model is saved and applied through the exact same `applyFittedModel()`
+  helper the 9-dot flow now also uses** (extracted from `finishCalibration()` as part of this
+  work) — same `state.coefX/coefY/gnorm`, same `saveCalibration()`/localStorage persistence, same
+  `calibModelId()`. A pursuit-fitted calibration round-trips through reload exactly like a 9-dot
+  one; nothing downstream (the accuracy test, `applyX`/`applyY`, recentering) needed to change.
+- **Deliberately does NOT surface its own quality check as a "recalibrate" prompt** — see the
+  Applied Math persona doc for why (`pursuitQuality`'s leave-one-out check was found, in this
+  session's own testing, to flag even an independently-good fit as "poor" for a continuous
+  trajectory). `applyFittedModel` is always called with `poor: false` from this flow. This was a
+  deliberate choice to ship something honest rather than something that looks more finished than
+  it is: a real, working alternative calibration flow with a known, documented, open validation gap,
+  not a fake "all clear" signal.
+- **What's genuinely verified (headlessly, via `pursuitCalibration.test.js`, 13 tests):** the
+  trajectory stays within bounds; the cross-correlation lag estimator recovers a known synthetic
+  lag exactly and its score cleanly peaks at the true lag (not a plateau); a fit built with the
+  correlation-estimated lag scores measurably better on independently-sampled held-out points than
+  a naive zero-lag assumption (concrete RMS numbers, not an assertion) — this is the core claim
+  (smooth-pursuit lag correction matters, and a literature-standard correlation approach recovers
+  it) and it's evidenced, not asserted.
+- **What's explicitly NOT verified, and needs a real human at a real webcam before this should be
+  considered anything more than an experiment:** the trajectory speed/duration/frequencies (10s,
+  Lissajous 3:4) were chosen from general knowledge of comfortable smooth-pursuit speed ranges, not
+  validated against a real user's actual eye-tracking comfort or the real MediaPipe iris signal's
+  actual noise characteristics while genuinely moving (only additive Gaussian noise was simulated).
+  Whether real users can comfortably follow this specific path for the full 10s, and whether the
+  resulting calibration is actually as accurate in practice as the 9-dot flow, is completely open —
+  this is presented to the user as "(experimental)" for exactly that reason, and should stay so
+  until someone verifies it live.
+- **Methodological note on how item 3 was researched:** no WebSearch/WebFetch tool was actually
+  available in this session despite being expected to be (mirrors the IR spike's own methodological
+  note above) — the trajectory-design and lag-correction reasoning here draws on general knowledge
+  of the smooth-pursuit eye-movement literature (the "Pursuits" interaction technique — Vidal,
+  Turner, Bulling & Gellersen — and the broader oculomotor-control latency/gain literature it
+  draws on) rather than a live literature check performed in this session. Treat specific numeric
+  claims about typical lag/speed ranges as reasonable-but-unverified-this-session, not
+  freshly-confirmed citations.
+
 **Open questions / future research:**
 - Whether iris landmarks alone (without full FaceLandmarker) could reduce the ~13MB first-load
   fetch further — not investigated. The fetch is now same-origin (see Privacy/Architecture
   persona), so this would only help load time, not the CDN-blocking failure mode that motivated
   self-hosting in the first place.
-- Robustness under glasses glare / low light beyond what "Check accuracy" already surfaces.
+- Robustness under glasses glare / low light beyond what "Check accuracy" already surfaces — the
+  per-eye confidence weighting above is a real, tested step toward this, but still needs live
+  verification against an actual glare/occlusion scenario (see above).
 - Whether the WebEyeTrack spike above (RGB appearance-based CNN, not IR) is worth pursuing — see
   the falsifiable next step spelled out above.
+- Smooth-pursuit calibration's own open items: (1) validate trajectory comfort/duration with real
+  users, (2) design a validation metric for continuous-trajectory calibration that doesn't have the
+  leave-one-segment-out over-flagging problem documented above and in the Applied Math persona doc,
+  (3) A/B its real (not synthetic) post-calibration accuracy against the proven 9-dot flow via the
+  app's own "Check accuracy" test with real users, before ever considering it for anything beyond
+  "(experimental)".
 

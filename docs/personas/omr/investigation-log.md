@@ -1470,3 +1470,250 @@ either grid variant, but is fragile in ways the grid method isn't, so both now r
   established ad hoc verification pattern — see the Testing/QA persona) driving the real dev
   server against real files from the local corpus; no PDF or rendered crop was committed or left
   on disk afterward.
+
+**Three-part investigation/implementation pass (2026-07-24): two spikes (time-signature glyph
+NAMES via the PDF font, and vector/operator-list staff-line & barline reading) plus one shipped
+fix (scanned-file section names, previously capped at 28.6% by a real bug in `ocr.js`). Full
+detail below; short verdicts are in the persona file.**
+
+- **Spike A — are time-signature glyph NAMES readable via `getOperatorList()`/`page.commonObjs`?
+  Checked directly against real corpus files (`randomclarinet/takefive.pdf`, `pinkpanther.pdf`,
+  `animesheetmusic/Peace_Sign Clarinet.pdf`, `Departure! Clarinet.pdf`), not assumed.** Loaded
+  each with `pdfjs.getDocument({ data, fontExtraProperties: true })` (Node, `pdfjs-dist/legacy/
+  build/pdf.js`, matching this project's established no-browser-automation verification pattern
+  — see the QA persona), called `page.getTextContent()` then `page.getOperatorList()` to force
+  fonts to load, then read each font's resolved object back via `page.commonObjs.get(loadedName,
+  cb)` for every font id observed in the text items (`g_dN_fM`, pdf.js's own internal naming).
+  Every embedded font checked (`QVAAAA+MScore`, `QGBAAA+MScoreRegular`, `QKBAAA+BravuraText`, and
+  their siblings — all MuseScore's own font family) reported `differences: []` — an EMPTY
+  `/Differences` array. **Conclusion: glyph names via this mechanism are a genuine, confirmed dead
+  end for this real corpus — there is no PDF-level `/Differences` array to read at all for these
+  files, so there's nothing for a name-based reader to find.** Closed; do not re-spike this exact
+  mechanism without new evidence (e.g. a file from different notation software, or a PDF known to
+  embed a real Type1 font with custom `/Differences`, which the corpus sampled here doesn't have).
+- **But a DIFFERENT, unplanned mechanism turned up a genuine positive while investigating this:
+  plain `page.getTextContent()` — the exact call already made everywhere else in this app, no
+  `fontExtraProperties`, no special options — sometimes ALREADY returns literal ASCII digit
+  characters for a printed time signature.** Found by dumping every text item whose `str` is a
+  clean 1-2 digit run and looking for vertically-stacked pairs (same x within 3pt, y-gap 4-20pt —
+  matching the real numerator/denominator layout of a printed time signature): `takefive.pdf`
+  shows `"5"`/`"4"` at x=120.8, y=673.77/664.73 (gap 9.0pt) — the file's real 5/4 time signature,
+  read exactly, as plain characters, no OCR or shape-matching involved. `Full band arrangements/
+  Fantastic Parade.pdf` (a full conductor's score) shows 23 correctly-paired `"6"`/`"8"` stacked
+  pairs, one per instrument staff on the page. `randomclarinet/flightofbumblebee.pdf` shows a
+  correct `"2"`/`"4"`. `animesheetmusic/Peace_Sign Clarinet.pdf` shows a correct `"4"`/`"4"` at
+  x=53.7, y=723.65/713.65 (gap 10.0pt) — the SAME file the original OCR/grid-based time-signature
+  spike (see the 2026-07-23 entries above) recorded as a correct, safe null result because "the
+  numerator/denominator glyphs are packed too tightly for either method's row-split to isolate
+  cleanly": the text layer already has the exact, correct answer sitting completely unused, for a
+  case the pixel-based approach is structurally unable to read at all.
+  - **Mechanism, traced into pdf.js's own source (`node_modules/pdfjs-dist/legacy/build/
+    pdf.worker.js`):** when a simple (non-composite) font has no explicit `/ToUnicode` CMap,
+    `buildToUnicode()` calls `_simpleFontToUnicode()`, which walks the font's effective encoding
+    (base encoding + any `/Differences`) and resolves each glyph name to Unicode via the Adobe
+    Glyph List, with a `uniXXXX`/hex-parsing fallback for unrecognized names. This ALREADY runs
+    unconditionally as part of ordinary text extraction — nothing new needed to trigger it, no
+    `fontExtraProperties` flag required (confirmed by re-running the same digit-pair scan with
+    plain `getDocument({ data })`, matching `scoreAnalysis.js`'s actual call exactly — identical
+    result). Whether the glyph name resolves to a real digit's Unicode codepoint or fails and
+    falls through to nothing depends entirely on what glyph name the specific embedded font
+    subset happens to use for that glyph.
+  - **This is NOT predictable by vendor or even by file family — checked and falsified directly.**
+    `Departure! Clarinet.pdf`, whose own embedded fonts (`QKBAAA+BravuraText`, `QQBAAA+MScore` —
+    the exact same font family as `Peace_Sign Clarinet.pdf`, both real MuseScore exports) encodes
+    its time signature glyph as an UNDECODED SMuFL PUA codepoint instead: `U+E084` (=`timeSig4` at
+    the SMuFL fixed codepoint this project's own `timeSigDetection.js` already uses for Bravura
+    template rendering — `SMUFL_TIMESIG_0 = 0xE080`), appearing TWICE (once per numerator/
+    denominator half) at the exact position a time signature sits, confirmed by direct inspection
+    of the page's top-left text items sorted by position. So two files from what looks like the
+    same underlying software diverge on this — one gives an exact, free digit read; the sibling
+    gives an opaque PUA codepoint requiring the existing pixel/OCR path. Five further
+    `animesheetmusic/*.pdf` files (`Dance_In_The_Game`, `Hacking_to_the_Gate`, `Mixed_Nuts`,
+    `Nameless_story`, plus `Departure!` itself) all showed zero stacked-digit-pair matches;
+    `Full band arrangements/KingCotton.pdf`/`MonogramMarch.pdf`/`Teutonia.pdf` (already known,
+    from earlier entries, to be scanned/near-textless files) correctly showed none either.
+  - **Verdict, not yet implemented:** exact time-signature reading straight off the existing text
+    layer is real and free where it applies, but must be attempted per-file via the
+    stacked-digit-pair geometric check (same x within a few pt, y-gap in the observed 9-10pt
+    range, both values in plausible beats/note-value ranges) and gated by whether that check
+    actually finds something — never assumed available from file metadata alone. Recommended as a
+    cheap, high-value follow-up: run this check first in `timeSigDetection.js`/`scoreText.js`,
+    keep the existing grid+OCR pixel path as the fallback for the (large) remaining set of files
+    where it doesn't apply. Not built this session — spike-only, to leave budget for the required
+    OCR section-name fix (below) and its benchmark verification.
+- **Spike B — can staff lines and barlines be read as vector primitives via
+  `page.getOperatorList()` instead of pixel scanning? Investigated against real corpus files
+  (`Peace_Sign Clarinet.pdf`, `takefive.pdf`, `Fantastic Parade.pdf`, an IMSLP trio score) — a
+  genuinely mixed, evidence-backed result, not shipped.**
+  - **Coordinate space: `getOperatorList()`'s raw op arguments are in the CURRENT user space at
+    the point each op appears in the content stream, NOT pre-composed with the accumulated CTM.**
+    Confirmed by walking the `save`(`OPS.save`)/`transform`(`OPS.transform`, i.e. PDF `cm`)/
+    `restore`(`OPS.restore`) op sequence and matrix-multiplying (`newCTM = m × CTM`, PDF's own row-
+    vector convention) every subsequent path coordinate against the CTM in force at that point —
+    the resulting composed coordinates matched the page's own known viewport exactly (e.g. a
+    595×842 A4 page's staff lines landed at real y-values like 728.65, 723.65, ... within that
+    range, not the raw pre-composition values in the thousands that appear directly in the
+    `constructPath` args). This is real, non-trivial work a caller has to do itself — pdf.js's own
+    canvas *rendering* path does this composition internally, but the public operator-list API
+    hands back pre-composition numbers.
+  - **Where it's checked, staff lines have an extremely clean, exploitable vector signature.**
+    `Peace_Sign Clarinet.pdf`: a single `OPS.constructPath` op containing exactly 5 horizontal
+    2-point line segments (`moveTo`+`lineTo` pairs) at uniform y-spacing (5.0pt apart) sharing one
+    x-range (one "chunk" of staff, chaining end-to-end into the next chunk's x-start) — 52 such
+    groups found on one page, none anywhere close to being confused with a slur (drawn via
+    `curveTo`, not `lineTo`), a hairpin/wedge (a V of two diagonal, non-horizontal lines), a beam
+    (a filled quad/thick stroke, not a plain 2-point line), or a stem (a single short vertical
+    segment, not a group of 5 evenly-spaced horizontal ones). A follow-on vertical-segment height
+    histogram on the same file shows a plausible barline candidate cluster (height ≈ 20pt = 4× the
+    5pt line-gap = the full derived staff height, 51 occurrences) alongside several other height
+    clusters (stems, flags, accents) — suggestive of a genuine barline signal, but NOT
+    independently confirmed as separable from note stems by geometry alone; that disambiguation
+    was not solved in this session.
+  - **But this is NOT universal — falsified directly on two further real files, not just one.**
+    `takefive.pdf`'s OWN, equally-visible 5-line staves produced ZERO `constructPath` groups
+    matching the signature above, AND zero filled-rectangle candidates (`op counts` for this
+    file's page showed 510 `constructPath` ops but none forming a 5-line staff-height group; only
+    3 rects on the whole page, none staff-shaped). `Full band arrangements/Fantastic Parade.pdf`
+    (a large, real conductor's score — a DIFFERENT vendor again, per its own distinct embedded
+    fonts) shows the identical negative pattern: 0 matching `constructPath` groups, 0 staff-shaped
+    rects, but 2083 `showText` calls. Op-count inspection on both files shows heavy `showText` use
+    — strongly suggesting these vendors' engraving software draws staff lines as part of a font
+    GLYPH run (`showText`) rather than raw vector path strokes, which `getOperatorList()` does not
+    decompose into any usable per-line geometry at all (a `showText` op's arguments are a font
+    reference + glyph/position data, not path coordinates) — a hard, structural dead end for these
+    files' staff lines regardless of technique refinement. Net sample: 1 of 3 real born-digital
+    files checked (`Peace_Sign Clarinet.pdf`, MuseScore's own `MScore` font) draws staff lines as
+    vector strokes; the other 2 don't — if anything, this suggests the vector path may be the
+    NARROWER case among real engraving software, not an even split, though 3 files is too small a
+    sample to generalize the ratio itself, only the existence of both cases.
+  - **Conclusion: promising but genuinely inconsistent across real vendors (viable for at least
+    one major real engraving family's output, a hard dead end for at least one other), and the
+    barline-vs-stem disambiguation needed to complete even the working case is unproven.** This is
+    exactly the "well-documented negative/mixed result" the task asked to produce if warranted —
+    NOT built as a shipping feature this session. A future dedicated investigation could build (a)
+    a cheap per-file viability probe (does this page's staff lines match the 5-line-group
+    signature at all?) before ever attempting the vector path, keeping the existing pixel scanner
+    as the unconditional fallback it already is for scans and for vendors like `takefive.pdf`'s;
+    and (b) real testing of barline/stem geometric disambiguation across more real files before
+    trusting it. Do not re-attempt this exact spike without new files/evidence — both the positive
+    half (Peace_Sign) and the negative half (takefive) are load-bearing findings.
+- **Implementation C — scanned-file section-name accuracy was capped at exactly 28.6% across
+  every benchmark snapshot ever taken (see the trend table above) by a real, previously
+  misdiagnosed bug, not merely "hard."** `src/ocr.js`'s shared Tesseract worker set
+  `tessedit_char_whitelist: '0123456789'` exactly ONCE, at worker creation (`getWorker()`), on the
+  assumption that only digit-reading would ever run through it. That made the OCR engine ITSELF
+  structurally incapable of recognizing a letter — not a downstream filtering choice, a
+  recognition-time constraint — so `collectKnownNames`/`findSectionTitle` (`lib/scoreText.js`,
+  already validated against real born-digital files) had literally nothing to work with on any
+  image-only page, regardless of how good their position/repetition matching logic was. Every
+  prior investigation session that touched OCR accuracy was, correctly, working on NUMBER-reading
+  (measure numbers, time-sig digits) because that was the only thing the worker could ever
+  produce.
+  - **Fix:** added a fourth OCR method, `ocrPageWords` (`src/ocr.js`) — PSM 3 (fully automatic page
+    segmentation), whitelist explicitly CLEARED, reading the top `topFrac` (default 0.3) of a
+    scanned page's rendered image (where engraving convention reliably puts a title block/first
+    system — the exact position convention `collectKnownNames` already relies on for the
+    text-layer case). Returns items in the SAME `{ str, x, y }` PDF-point shape
+    `page.getTextContent()` produces, specifically so the caller can feed OCR'd words into the
+    exact same, already real-corpus-validated `groupIntoRows`/`collectKnownNames`/
+    `findSectionTitle` pipeline — no second, parallel name-matching path to maintain or diverge
+    from the text-layer one.
+  - **Closed a real, load-bearing footgun while doing this, exactly as flagged going in:** since
+    `getWorker()` no longer sets the whitelist once at creation, every digit-reading call site
+    (`recognizeDigitsInBox` — shared by the measure-number BOX method and the time-signature OCR
+    method; `ocrNumbersByStrip`) now explicitly (re)sets `tessedit_char_whitelist: '0123456789'`
+    immediately before its OWN `recognize()` call, rather than relying on it being set once
+    somewhere earlier and never touched. This makes every OCR pass in the file self-contained and
+    safe to interleave in any order on the one shared worker (digits, then words, then digits
+    again, etc. within one page's analysis) — before this fix, `ocrPageWords` clearing the
+    whitelist would otherwise have silently and permanently broken every digit-reading call for
+    the rest of the run, since nothing downstream ever restored it.
+  - **Wired into both places `scoreAnalysis.js` needed real names on a scanned page.** The main
+    per-page loop: the OCR measure-number fetch (`ocrPageNumbers`) was moved to run BEFORE
+    section-title matching (previously it ran after, since it only used to produce measure-number
+    entries that nothing downstream needed early) and extended to also return `wordItems` when
+    asked for them — used for the page-0 bootstrap (`collectKnownNames`) ONLY, per the cost fix
+    below, substituting OCR'd words for real text-layer items when `pageItems.length === 0`.
+    Reuses the SAME already-rendered `stripCanvas` the existing STRIP digit method renders on that
+    one page — this costs one more `recognize()` call, not another `page.render()`.
+    `fillMissingSectionNames` (previously bailed out immediately — `if (!pageItems.length)
+    continue;` — on any nameless boundary landing on an image-only page) now falls back to
+    rendering + `ocrPageWords`-ing that one page instead, with its own matching `terminateOcr()`
+    cleanup (it runs after the main loop's own worker-lifetime, so needs to free the worker again
+    if it used one) — this is what actually recovers most per-part names on a scanned multi-part
+    booklet (see the cost fix below for why the main loop itself only ever does this for page 0).
+  - **Cost blowup found and fixed mid-verification, not anticipated going in:** the first working
+    version requested `needsWordItems` for EVERY OCR page (any page with `pageItems.length ===
+    0`), reusing the already-rendered strip canvas so it looked "free" (no extra render) — but a
+    third `recognize()` call per page is real Tesseract latency, and running it on every single
+    page of a large scanned booklet doesn't pay for itself: most interior pages could never
+    become a title match regardless (see above). This stalled a real benchmark run for many
+    minutes on `Personal conditioning duets and music/IMSLP231627-PMLP377546-
+    HLazarus_3_Grand_Artistic_Duets.pdf` (a real multi-part scanned duets booklet, ~20+ pages) —
+    caught by watching the benchmark's own progress log stop advancing past that file, not by
+    reasoning about it in advance. **Fixed** by scoping the main loop's word-OCR request to
+    `pageIdx === 0` only (the bootstrap case); `fillMissingSectionNames`'s own OCR use was already
+    correctly scoped (only the handful of pages with an actual nameless boundary) and needed no
+    change. General lesson: an OCR pass that "reuses an already-rendered canvas" is still not free
+    just because it avoids a second `page.render()` — the `recognize()` call itself is the
+    expensive part, and "only ever called on the OCR path" (this task's own stated cost
+    constraint) isn't a tight enough bound by itself for a per-page loop on a many-page file; it
+    needs to be scoped to WHERE the result could plausibly be used, not merely to WHICH FILES are
+    already OCR'd.
+  - **Real-corpus benchmark result and the root-cause diagnosis behind it, found by direct
+    browser-console tracing (temporary debug logging added to `fillMissingSectionNames`, removed
+    after use — same ad hoc verification pattern as prior sessions, see the QA persona), not
+    guessed.** The full 39-file benchmark's scanned/OCR section-name accuracy stayed at EXACTLY
+    28.6% before and after — the same number as every prior snapshot. Debugging this properly
+    (rather than accepting a flat "no effect" at face value) by driving the real app against 4 of
+    the 5 previously-zero-scoring files individually (`Teutonia.pdf`, `Fat Burger parts with drums
+    (1).pdf`, `KingCotton.pdf`, `MonogramMarch.pdf` — a temporary standalone Playwright script
+    reusing `scripts/benchmark/lib/{devServer,appDriver}.mjs`, not committed) found TWO distinct,
+    important things:
+    - **The fix itself genuinely works, verified directly.** `Fat Burger parts with drums (1).pdf`
+      page 35 (a real image-only page, confirmed by `ocrPageWords` actually firing) OCR'd real,
+      recognizable English words that were structurally impossible to produce before this session:
+      `"FAT"`/`"BURGER"` (title), `"By GEORGE VINCENT"` (composer), `"Baeirone SAXOPHONE"` — a
+      real, recognizable OCR misread of "Baritone Saxophone" (close enough to confirm the OCR
+      engine is genuinely reading letters now, imperfect recognition on a real degraded scan being
+      an entirely separate, expected concern from "can it recognize a letter at all").
+    - **But the OTHER three files (`Teutonia`, `KingCotton`, `MonogramMarch`) turned out to already
+      have a REAL, clean embedded text layer on their per-part pages — no OCR involved at all** —
+      `page.getTextContent()` directly returned `"1st CLARINET."` (KingCotton), `"FLUTE"`
+      (Teutonia AND MonogramMarch), `"JOHN PHILIP SOUSA"` (KingCotton), each a clean, correctly-
+      spelled real instrument name or composer credit, exactly where engraving convention says it
+      should be (near the very top of the part's own opening page). Yet in every one of these
+      cases, `collectKnownNames`'s position filter (`row.y > topY + pad` → skip, a piece of logic
+      already validated on other real files — see above) rejected the real name as "too far above
+      the referenced system, must be title-block text." Tracing WHY revealed the actual root
+      cause: `firstSystemForText` (built from the PIXEL-based system detector's own
+      `systemBands[b.systemIndex].fracMin/fracMax`) placed this boundary's "first system" much
+      lower on the page than where the name is actually printed — directly consistent with these
+      same files' already-known, severe system-detection undercount confirmed in this SAME
+      benchmark run (`Teutonia.pdf`: 80 systems detected vs. 152 true in ground truth;
+      `MonogramMarch.pdf`: 158 vs. presumably more). If pixel-based staff detection misses or
+      merges several real systems near the top of a page (this exact failure MODE — a dropped
+      staff corrupting neighboring gap statistics — is already documented above for a different
+      file, "Juggling Clowns," 2026-07-20), the reference system position fed into
+      `collectKnownNames` ends up well below the true first system, and the real name (correctly
+      printed right at the TRUE top) gets rejected as "too far above" a WRONG, too-low reference
+      point.
+    - **This is squarely `systemDetection.js`/pixel-detection territory, not a flaw in `ocr.js` or
+      `fillMissingSectionNames`** — a genuine, valuable, NEW finding (this exact bug class,
+      previously only documented as corrupting `systemDetection.js`'s OWN internal gap-clustering
+      statistics, is now confirmed to ALSO corrupt the separate text/OCR name-matching pipeline
+      several steps downstream) but a materially different, larger fix than this session's scope
+      (would need its own dedicated diagnosis of why these specific dense historical march
+      engravings under-count systems so badly — the same class of investigation the "Juggling
+      Clowns" bug required). Flagged here as the concrete next step for a future system-detection
+      accuracy session on this specific file class, not attempted in this session.
+    - **The existing "never surface a wrong guess" safety property held throughout — confirmed,
+      not just assumed:** none of these files got a WRONG name; they simply kept the generic
+      "Section N" fallback, exactly the documented safe behavior when nothing sufficiently
+      confident is found. This is a missed accuracy opportunity, not a correctness regression.
+  - **Verification:** full test suite (323 tests) + lint clean throughout, including after
+    removing the temporary debug logging used for the root-cause trace above. Real-corpus benchmark
+    run before/after via `scripts/benchmark/run.mjs` — see the numbers recorded alongside this
+    entry / in the persona file: no metric regressed anywhere in the 39-file suite (identical
+    aggregate numbers before/after down to the same decimal), and the scanned/OCR section-name
+    figure stayed at 28.6% for the reason diagnosed above, not because the fix doesn't work.

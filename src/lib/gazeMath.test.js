@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   vsub, vadd, vscl, vdot, vcross, vnorm,
-  headBasis, eyeGaze, eyeRatios, blendVec, eyeBlinkScores,
+  headBasis, eyeGaze, eyeRatios, blendVec, eyeBlinkScores, eyeConfidence,
 } from './gazeMath.js';
 
 const W = 640, H = 480;
@@ -10,9 +10,10 @@ const W = 640, H = 480;
 // and chin/forehead are arranged so headBasis works out to a clean identity
 // basis (right=+x, down=+y, fwd=+z), and both irises sit exactly at the
 // midpoint of their eye corners (i.e. "looking straight ahead").
-function makeLandmarks({ irisOffsetX = 0 } = {}) {
+function makeLandmarks({ irisOffsetX = 0, irisOffsetXL, irisOffsetXR } = {}) {
   const lm = Array.from({ length: 478 }, () => ({ x: 0, y: 0, z: 0 }));
   const set = (i, x, y, z = 0) => { lm[i] = { x, y, z }; };
+  const offL = irisOffsetXL ?? irisOffsetX, offR = irisOffsetXR ?? irisOffsetX;
 
   set(234, 0.3, 0.5);  // left face edge
   set(454, 0.7, 0.5);  // right face edge
@@ -22,14 +23,14 @@ function makeLandmarks({ irisOffsetX = 0 } = {}) {
   // left eye: outer 33, inner 133, iris 468
   set(33, 0.35, 0.5);
   set(133, 0.45, 0.5);
-  set(468, 0.40 + irisOffsetX, 0.5);
+  set(468, 0.40 + offL, 0.5);
   set(159, 0.40, 0.48); // upper lid
   set(145, 0.40, 0.52); // lower lid
 
   // right eye: inner 362, outer 263, iris 473
   set(263, 0.65, 0.5);
   set(362, 0.55, 0.5);
-  set(473, 0.60 + irisOffsetX, 0.5);
+  set(473, 0.60 + offR, 0.5);
   set(386, 0.60, 0.48); // upper lid
   set(374, 0.60, 0.52); // lower lid
 
@@ -124,6 +125,73 @@ describe('eyeBlinkScores', () => {
   });
 });
 
+describe('eyeConfidence', () => {
+  it('gives equal weight to two equally-open eyes', () => {
+    const w = eyeConfidence(0.05, 0.05);
+    expect(w.left).toBeCloseTo(w.right, 8);
+  });
+
+  it('barely shifts weight for ordinary rest-state asymmetry (small gap between two low scores)', () => {
+    const w = eyeConfidence(0.08, 0.12);
+    // Should stay close to 50/50, not swing hard toward one eye.
+    const total = w.left + w.right;
+    expect(w.left / total).toBeGreaterThan(0.48);
+    expect(w.left / total).toBeLessThan(0.52);
+  });
+
+  it('meaningfully down-weights an eye with an elevated (but sub-blink-gate) closure score', () => {
+    const w = eyeConfidence(0.05, 0.28); // right eye compromised (glare/occlusion/partial closure)
+    expect(w.right).toBeLessThan(w.left);
+    const total = w.left + w.right;
+    // A clear shift away from 50/50 (contrast with the ~48-52% band the
+    // ordinary-rest-asymmetry case above stays within).
+    expect(w.right / total).toBeLessThan(0.45);
+  });
+
+  it('never fully zeroes out either eye, even at full closure', () => {
+    const w = eyeConfidence(1, 1);
+    expect(w.left).toBeGreaterThan(0);
+    expect(w.right).toBeGreaterThan(0);
+  });
+});
+
+describe('eyeRatios with per-eye weighting', () => {
+  it('defaults (no weights passed) reduce to the flat 50/50 average, unchanged from before', () => {
+    const lm = makeLandmarks({ irisOffsetXL: 0.03, irisOffsetXR: -0.01 });
+    const withoutWeights = eyeRatios(lm, false, W, H);
+    const withEqualWeights = eyeRatios(lm, false, W, H, { left: 1, right: 1 });
+    expect(withoutWeights.rx).toBeCloseTo(withEqualWeights.rx, 10);
+  });
+
+  it('equal per-eye confidence (both eyes equally good) matches the flat average', () => {
+    const lm = makeLandmarks({ irisOffsetXL: 0.03, irisOffsetXR: -0.01 });
+    const flat = eyeRatios(lm, false, W, H);
+    const weighted = eyeRatios(lm, false, W, H, eyeConfidence(0.05, 0.05));
+    expect(weighted.rx).toBeCloseTo(flat.rx, 6);
+  });
+
+  it('down-weighting a compromised eye pulls rx toward the trusted eye\'s own reading', () => {
+    // Left iris shifted further right than the right iris — a flat average
+    // sits between the two; down-weighting the right eye (as if compromised)
+    // should pull the combined rx toward the left eye's own (larger) rx.
+    const lm = makeLandmarks({ irisOffsetXL: 0.04, irisOffsetXR: 0.01 });
+    const leftOnly = eyeRatios(lm, false, W, H, { left: 1, right: 0 });
+    const flat = eyeRatios(lm, false, W, H, { left: 1, right: 1 });
+    const rightMostlyDistrusted = eyeRatios(lm, false, W, H, { left: 1, right: 0.1 });
+    expect(rightMostlyDistrusted.rx).toBeGreaterThan(flat.rx);
+    expect(rightMostlyDistrusted.rx).toBeLessThan(leftOnly.rx + 1e-9);
+  });
+
+  it('pose mode also respects per-eye weighting', () => {
+    const lm = makeLandmarks({ irisOffsetXL: 0.03, irisOffsetXR: -0.03 });
+    const flat = eyeRatios(lm, true, W, H, { left: 1, right: 1 });
+    const leftWeighted = eyeRatios(lm, true, W, H, { left: 1, right: 0.1 });
+    // Left iris moved positive, right iris moved negative -> trusting left
+    // more should move the combined yaw toward the (positive) left-only value.
+    expect(leftWeighted.rx).toBeGreaterThan(flat.rx);
+  });
+});
+
 describe('blendVec', () => {
   it('returns zeros when blendshapes are absent', () => {
     expect(blendVec({})).toEqual({ bH: 0, bV: 0 });
@@ -147,5 +215,31 @@ describe('blendVec', () => {
     const { bH, bV } = blendVec(res);
     expect(bH).toBeCloseTo(0.4, 8);  // out(0.5) - in(0.1)
     expect(bV).toBeCloseTo(-0.2, 8); // down(0) - up(0.2)
+  });
+
+  it('defaults (no weights passed) match equal-weight combination, unchanged from before', () => {
+    const res = {
+      faceBlendshapes: [{
+        categories: [
+          { categoryName: 'eyeLookOutLeft', score: 0.6 },
+          { categoryName: 'eyeLookOutRight', score: 0.2 },
+        ],
+      }],
+    };
+    expect(blendVec(res)).toEqual(blendVec(res, { left: 1, right: 1 }));
+  });
+
+  it('down-weighting the right eye pulls bH toward the left eye\'s own reading', () => {
+    const res = {
+      faceBlendshapes: [{
+        categories: [
+          { categoryName: 'eyeLookOutLeft', score: 0.6 },
+          { categoryName: 'eyeLookOutRight', score: 0.2 },
+        ],
+      }],
+    };
+    const flat = blendVec(res, { left: 1, right: 1 });
+    const leftTrusted = blendVec(res, { left: 1, right: 0.1 });
+    expect(leftTrusted.bH).toBeGreaterThan(flat.bH);
   });
 });

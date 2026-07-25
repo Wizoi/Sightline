@@ -248,6 +248,107 @@ describe('decide: gaze smoothing (One Euro filter)', () => {
   });
 });
 
+describe('decide: staff-position prior (EXPERIMENTAL, off by default)', () => {
+  // cfg defaults here: center=400, deadZoneFrac 0.18*800=144 -> deadUp=deadDown=144,
+  // so the capture radius (deadUp+deadDown) is 288px.
+
+  it('is a no-op by construction when staffPriorOn is absent -- every prior test in this file already proves this: baseInput() never sets it, and none of their assertions changed', () => {
+    // Direct check anyway: identical input, only staffPriorOn toggled between
+    // undefined and explicit false, must produce byte-identical output.
+    const systemCentersDoc = [420];
+    const a = decide(createFollowState(), baseInput({ systemCentersDoc, rawGaze: { x: 300, y: 400, t: 990 } }));
+    const b = decide(createFollowState(), baseInput({ systemCentersDoc, staffPriorOn: false, rawGaze: { x: 300, y: 400, t: 990 } }));
+    expect(a).toEqual(b);
+  });
+
+  it('pulls the smoothed estimate toward a nearby known staff band when enabled', () => {
+    const systemCentersDoc = [420]; // 20px below screen-space band center (400)
+    const withPrior = decide(createFollowState(), baseInput({
+      staffPriorOn: true, systemCentersDoc, rawGaze: { x: 300, y: 400, t: 990 },
+    }));
+    const withoutPrior = decide(createFollowState(), baseInput({
+      staffPriorOn: false, systemCentersDoc, rawGaze: { x: 300, y: 400, t: 990 },
+    }));
+    expect(withoutPrior.state.smoothY).toBe(400); // unpulled: first sample passes through untouched
+    expect(withPrior.state.smoothY).toBeGreaterThan(400); // pulled toward the band at 420
+    expect(withPrior.state.smoothY).toBeLessThan(420); // gentle fractional pull, not a snap to the band itself
+  });
+
+  it('never pulls further in one frame than the fixed pull fraction of the gap (bounded, cannot relocate gaze in one step even if detection is wrong)', () => {
+    const systemCentersDoc = [400 + 200]; // 200px away, still inside the 288px capture radius
+    const r = decide(createFollowState(), baseInput({
+      staffPriorOn: true, systemCentersDoc, rawGaze: { x: 300, y: 400, t: 990 },
+    }));
+    expect(r.state.smoothY).toBeCloseTo(400 + 0.12 * 200, 5); // exactly one pull-fraction step, not a jump
+  });
+
+  it('does NOT pull when the nearest known band is farther than the plausible reading reach -- the deliberate-look-away safeguard', () => {
+    const systemCentersDoc = [400 + 400]; // 400px away > 288px capture radius
+    const r = decide(createFollowState(), baseInput({
+      staffPriorOn: true, systemCentersDoc, rawGaze: { x: 300, y: 400, t: 990 },
+    }));
+    expect(r.state.smoothY).toBe(400); // untouched, same as staffPriorOn: false would give
+  });
+
+  it('converges toward the nearest band over several frames without overshooting (same clamped, gradual idiom as drift correction)', () => {
+    // rawGaze.y tracks the previous frame's own smoothY, isolating the
+    // prior's contribution from the One Euro filter's own (independent, and
+    // separately-tested) time-domain smoothing of a *moving* raw signal --
+    // here the "raw" signal isn't moving on its own at all.
+    const systemCentersDoc = [500];
+    let state = createFollowState();
+    let rawY = 400;
+    let prevDelta = Infinity;
+    for (let i = 0; i < 40; i++) {
+      const now = 1000 + i * 33;
+      const r = decide(state, baseInput({
+        now, dt: i === 0 ? 0.05 : 0.033, staffPriorOn: true, systemCentersDoc,
+        rawGaze: { x: 300, y: rawY, t: now - 10 },
+      }));
+      state = r.state;
+      rawY = state.smoothY;
+      const delta = Math.abs(500 - state.smoothY);
+      expect(delta).toBeLessThanOrEqual(prevDelta + 1e-9); // monotonically closing in, never overshoots past 500
+      prevDelta = delta;
+    }
+    expect(state.smoothY).toBeGreaterThan(480); // meaningfully converged after 40 frames
+    expect(state.smoothY).toBeLessThanOrEqual(500); // still never overshot
+  });
+
+  it('can absorb a small calibration offset that would otherwise wrongly trigger a scroll, pulling the estimate back into the reading band', () => {
+    // Raw gaze reads out at 560 (offset 160 > deadDown=144 -> would trigger a
+    // "down" scroll), but the nearest detected staff band is still right at
+    // the true band center (400) -- i.e. the raw reading has drifted, not the
+    // music. A couple of frames of the prior should pull it back in-band.
+    const systemCentersDoc = [400];
+    let state = createFollowState();
+    let last;
+    for (let i = 0; i < 5; i++) {
+      const now = 1000 + i * 33;
+      last = decide(state, baseInput({
+        now, dt: i === 0 ? 0.05 : 0.033, staffPriorOn: true, systemCentersDoc,
+        rawGaze: { x: 300, y: 560, t: now - 10 },
+      }));
+      state = last.state;
+    }
+    expect(last.zoneText).toBe('read');
+    expect(last.status.text).toBe('following');
+
+    // Same raw signal without the prior stays in the "down" zone throughout.
+    let plainState = createFollowState();
+    let plainLast;
+    for (let i = 0; i < 5; i++) {
+      const now = 1000 + i * 33;
+      plainLast = decide(plainState, baseInput({
+        now, dt: i === 0 ? 0.05 : 0.033, staffPriorOn: false, systemCentersDoc,
+        rawGaze: { x: 300, y: 560, t: now - 10 },
+      }));
+      plainState = plainLast.state;
+    }
+    expect(plainLast.zoneText).toBe('down');
+  });
+});
+
 describe('decide: drift correction', () => {
   it('nudges biasY toward center only when drift is on and reading', () => {
     const input = baseInput({ driftOn: true, biasY: 0, rawGaze: { x: 300, y: 450, t: 990 } });

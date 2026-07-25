@@ -14,7 +14,9 @@ import {
 } from './lib/scoreAssembly.js';
 import { detectTimeSignature } from './timeSigDetection.js';
 import { locateMeasureNumber, locateMeasureNumberBelow } from './lib/measureNumberLocate.js';
-import { ocrNumbersByBox, ocrNumbersByStrip, terminateOcr } from './ocr.js';
+import {
+  ocrNumbersByBox, ocrNumbersByStrip, ocrPageWords, terminateOcr,
+} from './ocr.js';
 import { scoreOrientation, chooseRotation } from './lib/pageRotation.js';
 
 // Some source PDFs carry a wrong /Rotate flag on individual pages — a real
@@ -172,7 +174,7 @@ async function renderPageCanvas(page, viewport1x, targetW, rotation) {
 // gets its own render.
 const OCR_BOX_WIDTH = 2600;
 const OCR_STRIP_WIDTH = 1500;
-async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, ah, rotation) {
+async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, ah, rotation, needsWordItems) {
   // BOX method: locate a tight box per system on the high-res render, OCR each.
   const boxCanvas = await renderPageCanvas(page, viewport1x, OCR_BOX_WIDTH, rotation);
   const data = boxCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, boxCanvas.width, boxCanvas.height).data;
@@ -210,7 +212,17 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
   const stripItems = await ocrNumbersByStrip(stripCanvas, viewport1x.width, viewport1x.height);
   const stripEntries = extractMeasureNumbers(stripItems, systemsForText);
 
-  return { boxEntries, stripEntries };
+  // WORDS method (only when the caller actually needs it -- an image-only
+  // page with no real text layer at all; see the call site): reuses the
+  // SAME already-rendered stripCanvas (a full-page render, not yet cropped
+  // to the left margin -- ocrNumbersByStrip does that cropping itself) so
+  // this costs one more recognize() call, not another page.render(). See
+  // ocr.js's ocrPageWords for why this needs its own pass rather than being
+  // read off the same recognize() call as the STRIP method above (that one
+  // runs with the digit-only whitelist active).
+  const wordItems = needsWordItems ? await ocrPageWords(stripCanvas, viewport1x.width, viewport1x.height) : [];
+
+  return { boxEntries, stripEntries, wordItems };
 }
 
 // Scans the rendered score for systems (the same staff-line detection Snap
@@ -251,12 +263,20 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
 // boundary landing on them -- typically a small number of pages even on a
 // many-part booklet. `rotationOverrides` is the same map probePageRotation()
 // built during the main pass, so a page whose declared /Rotate was wrong
-// still gets its text read in the correctly-resolved orientation. Quietly
-// does nothing when that page has no extractable text at all (a scanned/
-// image-only part, same as why the page-1 bootstrap only works on pages
-// with a real text layer) -- the boundary just keeps its generic name,
-// exactly as before this function existed.
+// still gets its text read in the correctly-resolved orientation. When the
+// page has no extractable text at all (a scanned/image-only part), this now
+// falls back to OCR'ing the page's own top region for words (ocrPageWords,
+// same as the main analyzeScore() loop above) rather than giving up
+// entirely -- this is exactly the case this function exists for on a
+// scanned booklet: a measure-number reset (lib/scoreText.js's
+// detectMeasureNumberResets) already gives the BOUNDARY, from OCR'd digits,
+// but had nothing to name it with until this existed, since digit-only OCR
+// structurally cannot read a name (see ocr.js's getWorker() doc comment).
+// This re-render+OCR only runs for the handful of nameless boundary pages,
+// same cost shape as the pre-existing text-layer path, just paying an OCR
+// pass instead of a free getTextContent() call on a scanned file.
 async function fillMissingSectionNames(boundaries, systemBands, rotationOverrides) {
+  let ocrTouched = false;
   for (const b of boundaries) {
     if (b.name) continue; // already named via title-match
     const sys = systemBands[b.systemIndex];
@@ -278,12 +298,22 @@ async function fillMissingSectionNames(boundaries, systemBands, rotationOverride
       page = await state.pdfDoc.getPage(pageIdx + 1);
       content = await page.getTextContent();
     } catch (e) { continue; }
-    const pageItems = content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
-    if (!pageItems.length) continue; // image-only page -- nothing to read here
+    let pageItems = content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
 
     const declaredRotation = ((page.rotate % 360) + 360) % 360;
     const rotation = rotationOverrides[pageIdx] ?? declaredRotation;
     const pdfHeight = page.getViewport({ scale: 1, rotation }).height;
+
+    if (!pageItems.length) {
+      // Image-only page -- try OCR'ing real words off it instead of bailing.
+      try {
+        const viewport1x = page.getViewport({ scale: 1, rotation });
+        const canvas = await renderPageCanvas(page, viewport1x, OCR_STRIP_WIDTH, rotation);
+        pageItems = await ocrPageWords(canvas, viewport1x.width, viewport1x.height);
+        ocrTouched = true;
+      } catch (e) { /* OCR unavailable/failed -- boundary just keeps its generic name */ }
+    }
+    if (!pageItems.length) continue; // still nothing to read here
     const firstSystemForText = {
       yTop: pdfHeight * (1 - sys.fracMin),
       yBottom: pdfHeight * (1 - sys.fracMax),
@@ -293,6 +323,11 @@ async function fillMissingSectionNames(boundaries, systemBands, rotationOverride
     const full = names.find((n) => n.isFull);
     if (full) b.name = full.text;
   }
+  // This function's own OCR use (if any) is separate from the main loop's
+  // ocrWorkerTouched/terminateOcr -- it runs AFTER that loop has already
+  // freed the worker (see call site in analyzeScore()), so it needs its own
+  // matching cleanup rather than silently leaving a second worker running.
+  if (ocrTouched) await terminateOcr();
 }
 
 // Dev/benchmark-only override: forces every page's measure-number reading
@@ -462,7 +497,49 @@ export async function analyzeScore() {
         yBottom: pdfHeight * (1 - s.rowMax / ah),
       }));
 
-      const pageRows = groupIntoRows(pageItems);
+      // Image-only page (pageItems.length === 0, the ONLY case usedOcr can be
+      // true with nothing in pageItems -- forceOcr's dev/benchmark override
+      // still has real pageItems to fall back on): the OCR pass below has to
+      // run BEFORE section-title matching, not after (where the original,
+      // measure-number-only version of this call used to sit), because
+      // collectKnownNames/findSectionTitle need real words to match against
+      // and there IS no text layer to read them from otherwise. Fetching
+      // boxEntries/stripEntries together here (one render) means the later
+      // `if (usedOcr)` block below just reuses what was already read, rather
+      // than OCRing the same page twice for measure numbers.
+      //
+      // Word-OCR (needsWordItems) is only ever requested for page 0 here --
+      // NOT every OCR page. A first attempt requested it unconditionally for
+      // every image-only page and stalled a real multi-part scanned booklet
+      // ("...HLazarus_3_Grand_Artistic_Duets.pdf", ~20+ pages) for minutes:
+      // a third full recognize() pass on every single page of a large
+      // booklet is real, non-trivial cost, and most of those pages could
+      // never become a title match anyway (findSectionTitle needs knownNames
+      // bootstrapped from page 0 in the first place, which mainly happens
+      // for a combined SCORE's opening page listing every instrument --
+      // rare for this app's realistic scanned-file audience of individual
+      // part booklets, see the target-audience persona note). The actual,
+      // common fix for a scanned multi-part booklet's per-part names is
+      // fillMissingSectionNames() below -- already scoped to just the
+      // handful of pages with an actual nameless boundary (a measure-number
+      // reset), which is cheap by design and unaffected by this scoping.
+      let ocrResult = null;
+      if (usedOcr) {
+        usedOcrAnywhere = true;
+        ocrWorkerTouched = true;
+        setStatus('', `Reading printed measure numbers (page ${pageIdx + 1}/${numPages})…`);
+        ocrResult = await ocrPageNumbers(
+          page, pageViewport1x, systemsOnThisPage, systemsForText, ah, rotation, pageIdx === 0 && pageItems.length === 0,
+        );
+      }
+      // Real text-layer items if there are any; otherwise (a genuinely
+      // image-only page) fall back to this page's OCR'd word items, in the
+      // exact same { str, x, y } shape -- see ocrPageWords()'s doc comment
+      // in ocr.js for why this lets collectKnownNames/findSectionTitle stay
+      // completely unaware of which source their input came from.
+      const textItems = pageItems.length ? pageItems : (ocrResult ? ocrResult.wordItems : []);
+
+      const pageRows = groupIntoRows(textItems);
       let isSectionStart = false;
       if (pageIdx === 0) {
         // Page 1 is always the *source* of known instrument names (a full
@@ -473,9 +550,9 @@ export async function analyzeScore() {
         knownNames = collectKnownNames(pageRows, systemsForText[0] || null);
         isSectionStart = true; // page 1 is always the first section's start
       } else {
-        const title = findSectionTitle(pageItems, pageRows, knownNames);
+        const title = findSectionTitle(textItems, pageRows, knownNames);
         if (title && systemsOnThisPage.length) {
-          const tempo = findTempoMarking(pageItems);
+          const tempo = findTempoMarking(textItems);
           boundaries.push({
             systemIndex: systemsOnThisPage[0].index,
             name: title,
@@ -512,14 +589,11 @@ export async function analyzeScore() {
         // can be compared after the loop. Each is filtered per page to the
         // coherent, strictly-increasing set, so an OCR misread can't corrupt a
         // count worse than the barline fallback (and a multi-part score's
-        // per-part number reset isn't mistaken for a break). Section titles /
-        // tempo words / time-sig digits aren't text here, so nothing else to read.
-        usedOcrAnywhere = true;
-        ocrWorkerTouched = true;
-        setStatus('', `Reading printed measure numbers (page ${pageIdx + 1}/${numPages})…`);
-        const { boxEntries, stripEntries } = await ocrPageNumbers(page, pageViewport1x, systemsOnThisPage, systemsForText, ah, rotation);
-        ocrEntriesBox.push(...filterMeasureNumberOutliers(boxEntries));
-        ocrEntriesStrip.push(...filterMeasureNumberOutliers(stripEntries));
+        // per-part number reset isn't mistaken for a break). ocrResult was
+        // already fetched above (before section-title matching needed its
+        // wordItems) -- reused here rather than OCRing the page a second time.
+        ocrEntriesBox.push(...filterMeasureNumberOutliers(ocrResult.boxEntries));
+        ocrEntriesStrip.push(...filterMeasureNumberOutliers(ocrResult.stripEntries));
       } else {
         // Text-layer page: read the real printed numbers + tempo marks directly.
         measureNumberEntries.push(...extractMeasureNumbers(pageItems, systemsForText));

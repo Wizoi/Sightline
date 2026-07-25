@@ -26,6 +26,13 @@
 // number. See docs/personas/omr/investigation-log.md's 2026-07-23 write-up for why this
 // was tried (a cheaper, zero-new-dependency alternative to bundling
 // engraving-font reference glyphs) and what it actually measured.
+//
+// A FOURTH method, added later, reads ordinary LETTERS rather than digits:
+//   • WORDS — OCR the top of the page (PSM 3, no digit whitelist) for
+//             instrument names / section titles, so a scanned/image-only
+//             PDF's section names can be matched the same way a born-digital
+//             PDF's real text layer already is (lib/scoreText.js). See
+//             ocrPageWords() below and docs/personas/omr/investigation-log.md.
 
 // A recognized word's canvas-pixel bbox -> a pdfjs-style text point { x, y } in
 // PDF points (y flips: the text layer's origin is the page's bottom-left).
@@ -38,6 +45,21 @@ export function bboxToPoint(bbox, pxPerPt, pageHeightPts) {
 
 let workerPromise = null;
 
+// Shared worker, ONE instance reused across every page/method in an analysis
+// run. `tessedit_char_whitelist` used to be set exactly once here, at
+// creation, on the (then-true) assumption that only digit-reading ever
+// happened through this worker. That stopped being true once ocrPageWords()
+// (below) was added to read real letters (instrument names/section titles)
+// off scanned pages for fillMissingSectionNames/collectKnownNames-style
+// matching (see docs/personas/omr/investigation-log.md) -- a whitelist set once and never
+// touched again would silently apply to EVERY call for the rest of the
+// worker's life, corrupting whichever kind of pass didn't run first. So
+// nothing sets `tessedit_char_whitelist` here anymore: every digit-reading
+// call site (recognizeDigitsInBox, ocrNumbersByStrip) now (re)sets it to
+// digits-only immediately before its own recognize() call, and ocrPageWords
+// clears it immediately before its own -- each pass is self-contained and
+// safe to interleave in any order within one page's analysis, rather than
+// relying on nothing else ever mutating shared worker state.
 async function getWorker() {
   if (workerPromise) return workerPromise;
   workerPromise = (async () => {
@@ -49,7 +71,6 @@ async function getWorker() {
       langPath: base,
       gzip: true, // model is eng.traineddata.gz
     });
-    await worker.setParameters({ tessedit_char_whitelist: '0123456789' }); // measure numbers are digits only
     return worker;
   })();
   return workerPromise;
@@ -110,6 +131,11 @@ async function recognizeDigitsInBox(worker, canvas, box, { padPx = 6, upscale = 
   cctx.fillRect(0, 0, crop.width, crop.height);
   cctx.drawImage(canvas, x, y, w, h, 0, 0, crop.width, crop.height);
   if (stripStaffLines) stripStaffLineRows(cctx, crop.width, crop.height);
+  // Explicitly (re)set the digit-only whitelist right before this call --
+  // see getWorker()'s doc comment for why this can no longer be assumed set
+  // once at worker creation (ocrPageWords, below, clears it for its own,
+  // interleaved-in-time letter-reading pass on the same shared worker).
+  await worker.setParameters({ tessedit_char_whitelist: '0123456789' });
   const { data } = await worker.recognize(crop.toDataURL('image/png'));
   const digits = (data.text || '').replace(/\D+/g, '');
   return { digits: digits || null, confidence: data.confidence };
@@ -150,6 +176,8 @@ export async function ocrDigitsBox(canvas, box, opts = {}) {
 export async function ocrNumbersByBox(canvas, boxes) {
   const worker = await getWorker();
   await worker.setParameters({ tessedit_pageseg_mode: '8' }); // single word = one isolated number
+  // recognizeBox -> recognizeDigitsInBox (re)sets the digit whitelist itself
+  // per box, so nothing extra needed here — see recognizeDigitsInBox.
   const out = [];
   for (const { systemIndex, box, boxBelow } of boxes) {
     let num = box ? await recognizeBox(worker, canvas, box) : null;
@@ -167,7 +195,11 @@ export async function ocrNumbersByBox(canvas, boxes) {
 // x-filtered so only the far-left number column survives.
 export async function ocrNumbersByStrip(canvas, pageWidthPts, pageHeightPts, { cropFrac = 0.33, leftFrac = 0.2, minConfidence = 55 } = {}) {
   const worker = await getWorker();
-  await worker.setParameters({ tessedit_pageseg_mode: '6' }); // one uniform block down the left column
+  // Explicitly (re)set the digit-only whitelist right before this call — see
+  // getWorker()'s doc comment: this is no longer set once at worker
+  // creation, since ocrPageWords (below) needs the SAME shared worker with
+  // no whitelist at all for its own, interleaved-in-time letter-reading pass.
+  await worker.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '6' }); // one uniform block down the left column
   const cropW = Math.max(1, Math.round(canvas.width * cropFrac));
   const strip = document.createElement('canvas');
   strip.width = cropW;
@@ -187,6 +219,66 @@ export async function ocrNumbersByStrip(canvas, pageWidthPts, pageHeightPts, { c
           const pt = bboxToPoint(w.bbox, pxPerPt, pageHeightPts);
           if (pt.x > maxX) continue;
           items.push({ str, ...pt });
+        }
+      }
+    }
+  }
+  return items;
+}
+
+// --- Method WORDS -----------------------------------------------------
+// Reads real LETTERS (instrument/part names, tempo words) off a scanned
+// page's rendered image — the piece the digit-only paths above structurally
+// cannot provide. `tessedit_char_whitelist: '0123456789'` (set immediately
+// before every digit-reading recognize() call above) makes the OCR engine
+// itself incapable of ever recognizing a letter, not merely something that
+// gets filtered out afterward -- see docs/personas/omr/investigation-log.md's
+// 2026-07 write-up for why scanned-file section-name accuracy sat fixed at
+// 28.6% across every benchmark snapshot before this existed: every OCR pass
+// available for a scanned page could only ever recognize digits, so
+// fillMissingSectionNames/collectKnownNames-style name matching (lib/
+// scoreText.js) had literally nothing to work with on an image-only file,
+// no matter how good the position/repetition logic itself was.
+//
+// Returns pdfjs-shaped items ({ str, x, y } in PDF points), the SAME shape
+// page.getTextContent() produces for a real text layer -- deliberately, so
+// the caller (scoreAnalysis.js) can feed OCR'd words into the exact same,
+// already real-corpus-validated groupIntoRows/collectKnownNames/
+// findSectionTitle pipeline used for born-digital PDFs, rather than
+// building a second, parallel name-matching path. Cropped to the page's TOP
+// topFrac (instrument names and tempo markings sit at/near the very top of
+// a part's opening page — the same "position, not repetition" convention
+// collectKnownNames already relies on for the text-layer case) both to keep
+// this cheap (only ever called for pages already on the OCR path -- see
+// scoreAnalysis.js) and to reduce misreads (a full page of staff notation
+// OCR'd as "text" produces much more garbage than just its title block).
+// PSM 3 (fully automatic page segmentation) rather than the digit paths'
+// PSM 6/8/11 — this is ordinary running/title text, not one isolated number
+// or a single left-hand column.
+export async function ocrPageWords(canvas, pageWidthPts, pageHeightPts, { topFrac = 0.3, minConfidence = 55 } = {}) {
+  const worker = await getWorker();
+  // Explicitly clear the whitelist (empty string = no restriction) right
+  // before this call -- see getWorker()'s doc comment. Never leaves the
+  // whitelist cleared for anyone else: every digit-reading call site above
+  // re-sets it to digits-only immediately before its own recognize() call,
+  // so this is safe to interleave in either order.
+  await worker.setParameters({ tessedit_char_whitelist: '', tessedit_pageseg_mode: '3' });
+  const cropH = Math.max(1, Math.round(canvas.height * topFrac));
+  const crop = document.createElement('canvas');
+  crop.width = canvas.width;
+  crop.height = cropH;
+  crop.getContext('2d').drawImage(canvas, 0, 0, canvas.width, cropH, 0, 0, canvas.width, cropH);
+  const { data } = await worker.recognize(crop.toDataURL('image/png'), {}, { blocks: true });
+
+  const pxPerPt = canvas.width / pageWidthPts;
+  const items = [];
+  for (const block of (data.blocks || [])) {
+    for (const par of (block.paragraphs || [])) {
+      for (const line of (par.lines || [])) {
+        for (const w of (line.words || [])) {
+          const str = (w.text || '').trim();
+          if (!str || w.confidence < minConfidence) continue;
+          items.push({ str, ...bboxToPoint(w.bbox, pxPerPt, pageHeightPts) });
         }
       }
     }
