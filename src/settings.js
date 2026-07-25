@@ -143,7 +143,7 @@ function applyTrackingTypeUI() {
   const isWink = state.trackingType === 'wink';
   const needsCalib = getActiveTracking().needsCalibration;
   $('calibBtn').style.display = needsCalib ? '' : 'none';
-  $('pursuitCalibBtn').style.display = needsCalib ? '' : 'none';
+  $('calibFallbackBtn').style.display = needsCalib ? '' : 'none';
   $('testBtn').style.display = needsCalib ? '' : 'none';
   $('winkStrengthRow').classList.toggle('hidden', !isWink);
   $('smoothnessRow').classList.toggle('hidden', isWink);

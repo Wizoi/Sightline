@@ -6,7 +6,7 @@ import {
   calibMismatch as calibMismatchPure,
 } from './lib/calibrationModel.js';
 import {
-  pursuitTarget, fitPursuitCalibration, CX, CY,
+  pursuitTarget, fitPursuitCalibration, sweepTimeFromElapsed, totalPursuitSec, CX, CY,
   DEFAULT_DURATION_SEC as PURSUIT_DURATION_SEC,
   DEFAULT_LEAD_IN_SEC as PURSUIT_LEAD_IN_SEC,
 } from './lib/pursuitCalibration.js';
@@ -200,9 +200,12 @@ export function runPursuitCalibration() {
       requestAnimationFrame(step);
       return;
     }
-    const tSec = elapsed - PURSUIT_LEAD_IN_SEC;
-    if (tSec >= PURSUIT_DURATION_SEC) { finish(); return; }
-    const { x, y } = pursuitTarget(tSec, PURSUIT_DURATION_SEC);
+    const moveElapsed = elapsed - PURSUIT_LEAD_IN_SEC;
+    if (moveElapsed >= totalPursuitSec(PURSUIT_DURATION_SEC)) { finish(); return; }
+    // Dwell holds freeze the trajectory without freezing the clock, so the
+    // conversion happens once here and everything downstream (including the
+    // fit) keeps working in the sweep's own trajectory time.
+    const { x, y } = pursuitTarget(sweepTimeFromElapsed(moveElapsed, PURSUIT_DURATION_SEC), PURSUIT_DURATION_SEC);
     dot.style.left = (x * 100) + 'vw';
     dot.style.top = (y * 100) + 'vh';
     requestAnimationFrame(step);
@@ -223,12 +226,14 @@ export function runPursuitCalibration() {
     // the moving portion. See DEFAULT_LEAD_IN_SEC for why they're discarded
     // rather than kept as center-labeled data.
     const rel = samples
-      .filter((s) => typeof s.t === 'number')
+      // Drop the stationary lead-in FIRST, while each sample still has its
+      // raw capture time — the mapped rows below no longer carry `t`.
+      .filter((s) => typeof s.t === 'number' && (s.t - t0) / 1000 >= PURSUIT_LEAD_IN_SEC)
       .map((s) => ({
-        tSec: (s.t - t0) / 1000 - PURSUIT_LEAD_IN_SEC, rx: s.rx, ry: s.ry,
+        tSec: sweepTimeFromElapsed((s.t - t0) / 1000 - PURSUIT_LEAD_IN_SEC, PURSUIT_DURATION_SEC),
+        rx: s.rx, ry: s.ry,
         bH: s.bH || 0, bV: s.bV || 0, rxL: s.rxL, ryL: s.ryL, rxR: s.rxR, ryR: s.ryR,
-      }))
-      .filter((s) => s.tSec >= 0);
+      }));
     const result = fitPursuitCalibration(rel, PURSUIT_DURATION_SEC);
     if (!result) {
       toast('Pursuit calibration failed — try again, or use the 9-point Calibrate instead');

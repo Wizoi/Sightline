@@ -54,7 +54,7 @@ export async function startCamera() {
     state.camReady = true;
     $('camBtn').textContent = '🎥 Camera on';
     $('calibBtn').disabled = false;
-    $('pursuitCalibBtn').disabled = false;
+    $('calibFallbackBtn').disabled = false;
 
     // Restore a saved iris calibration by default (only relevant if iris
     // tracking is the active type); flag if the setup looks different.

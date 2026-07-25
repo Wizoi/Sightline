@@ -32,8 +32,14 @@ $('file').onchange = (e) => {
   reader.readAsArrayBuffer(f);
 };
 $('camBtn').onclick = startCamera;
-$('calibBtn').onclick = runCalibration;
-$('pursuitCalibBtn').onclick = runPursuitCalibration;
+// Smooth-pursuit is the PRIMARY calibration (see docs/personas/01-gaze-cv-engineer.md):
+// real-use testing found it dramatically easier to complete, with accuracy
+// indistinguishable from the 9-dot grid within that session's measurement
+// noise. The 9-dot flow stays available as a fallback rather than being
+// removed -- it's the proven path, and someone whose eyes don't pursue
+// smoothly (or whose saved calibration predates this) still needs it.
+$('calibBtn').onclick = runPursuitCalibration;
+$('calibFallbackBtn').onclick = runCalibration;
 $('calibCancel').onclick = cancelCalibration;
 $('pursuitCancel').onclick = cancelPursuitCalibration;
 $('runBtn').onclick = () => {
@@ -52,13 +58,13 @@ $('runBtn').onclick = () => {
 $('recenterBtn').onclick = recenter;
 $('testBtn').onclick = runAccuracyTest;
 $('accStart').onclick = beginAccuracySequence;
-$('accRecal').onclick = () => { $('accres').style.display = 'none'; runCalibration(); };
+$('accRecal').onclick = () => { $('accres').style.display = 'none'; runPursuitCalibration(); };
 $('accClose').onclick = () => { $('accres').style.display = 'none'; };
 $('winkCalibrateBtn').onclick = runWinkCalibration;
 $('winkTestStart').onclick = beginWinkCalibrationSequence;
 $('winkTestRetry').onclick = () => { $('winkTestRes').style.display = 'none'; runWinkCalibration(); };
 $('winkTestClose').onclick = () => { $('winkTestRes').style.display = 'none'; };
-$('recalNow').onclick = () => { hideRecalBanner(); runCalibration(); };
+$('recalNow').onclick = () => { hideRecalBanner(); runPursuitCalibration(); };
 $('recalDismiss').onclick = hideRecalBanner;
 
 // Foot pedal / mouse click anywhere on the score = pause toggle
@@ -106,7 +112,7 @@ window.addEventListener('keydown', (e) => {
   // otherwise double up with the manual scrollBy() here.
   else if (e.code === 'PageDown') { e.preventDefault(); window.scrollBy(0, 60); }
   else if (e.code === 'PageUp') { e.preventDefault(); window.scrollBy(0, -60); }
-  else if (e.key.toLowerCase() === 'c') runCalibration();
+  else if (e.key.toLowerCase() === 'c') runPursuitCalibration();
   else if (e.key.toLowerCase() === 'r') recenter();
   else if (e.key.toLowerCase() === 'b') { $('showBand').click(); }
   else if (e.key.toLowerCase() === 'm') toggleMin();

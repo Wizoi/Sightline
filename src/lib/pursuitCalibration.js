@@ -110,6 +110,59 @@ export const RAMP_SEC = 1.5;
 // would swamp the signal it needs with a flat segment.
 export const DEFAULT_LEAD_IN_SEC = 3;
 export const DEFAULT_SEGMENTS = 10;
+
+// Brief stops partway along the sweep, where the target holds still before
+// moving on. Suggested from real use ("should the dot stop in a few places
+// to get a resting accuracy reading and then go again?") and worth doing for
+// a concrete reason, not just comfort: during a FIXATION there is no
+// smooth-pursuit lag to estimate at all. The eye is simply on the target, so
+// those samples are the same quality as a 9-dot flow's, and they anchor the
+// fit at known screen positions. The moving segments still provide the broad,
+// even coverage that a 9-point grid can't. A dwell is also inherently
+// lag-INSENSITIVE: shifting a sample's time by ±100ms while the target is
+// stationary barely changes where the target was, so these samples stay
+// correctly labeled even if the lag estimate is somewhat off — which is
+// exactly the failure mode that made pursuit inconsistent run to run.
+export const DEFAULT_DWELL_COUNT = 4;
+export const DEFAULT_DWELL_SEC = 0.6;
+
+// Real wall-clock length of the moving phase, including the dwell holds.
+// The sweep's own trajectory time is still `durationSec`; dwells add real
+// time without advancing the trajectory (see sweepTimeFromElapsed).
+export function totalPursuitSec(durationSec = DEFAULT_DURATION_SEC, {
+  dwellCount = DEFAULT_DWELL_COUNT, dwellSec = DEFAULT_DWELL_SEC,
+} = {}) {
+  return durationSec + dwellCount * dwellSec;
+}
+
+// Maps real elapsed time (since the sweep began) to the sweep's own
+// trajectory time, freezing the trajectory during each dwell. Dwells are
+// evenly spaced through trajectory time, excluding the very start and end
+// (a dwell at t=0 would just extend the stationary lead-in, and one at the
+// end would delay the finish for nothing).
+//
+// Deliberately kept SEPARATE from pursuitTarget rather than folded into it:
+// the fit, the lag estimator and the display must all agree on where the
+// target was at a given moment, and the cleanest way to guarantee that is a
+// single conversion applied once (elapsed -> sweep time) with everything
+// downstream continuing to work in sweep time exactly as before.
+export function sweepTimeFromElapsed(elapsedSec, durationSec = DEFAULT_DURATION_SEC, {
+  dwellCount = DEFAULT_DWELL_COUNT, dwellSec = DEFAULT_DWELL_SEC,
+} = {}) {
+  if (dwellCount <= 0 || dwellSec <= 0) return Math.max(0, Math.min(durationSec, elapsedSec));
+  let remaining = Math.max(0, elapsedSec);
+  let sweep = 0;
+  for (let i = 1; i <= dwellCount; i++) {
+    const dwellAt = (durationSec * i) / (dwellCount + 1);
+    const untilDwell = dwellAt - sweep;
+    if (remaining < untilDwell) return sweep + remaining;
+    remaining -= untilDwell;
+    sweep = dwellAt;
+    if (remaining < dwellSec) return sweep;  // currently holding still
+    remaining -= dwellSec;
+  }
+  return Math.min(durationSec, sweep + remaining);
+}
 // Candidate smooth-pursuit lags to search over (see module doc comment
 // above) — NOT tuned against real user sessions (no corpus of "real pursuit
 // traces with known-true lag" exists to validate this against, the same
