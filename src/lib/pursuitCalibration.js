@@ -268,6 +268,14 @@ export function buildPursuitCalibPoints(samples, durationSec, lagSec, segments =
     const { x, y } = pursuitTarget(targetT, durationSec);
     out.push({
       sx: x, sy: y, rx: s.rx, ry: s.ry, bH: s.bH || 0, bV: s.bV || 0,
+      // Carry each eye's own ratios through. Without these, calibrationModel's
+      // chooseEyeMode sees no per-eye data on this path and silently returns
+      // 'both' every time — which is exactly what happened when pursuit became
+      // the primary flow: the eye-selection feature was dead for every user who
+      // never touched the 9-dot fallback. Undefined on rows that genuinely
+      // lack them (older data, synthetic fixtures), which chooseEyeMode
+      // already treats as "no per-eye data" and handles correctly.
+      rxL: s.rxL, ryL: s.ryL, rxR: s.rxR, ryR: s.ryR,
       pointId: segmentIndexAt(targetT, durationSec, segments),
     });
   }

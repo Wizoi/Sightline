@@ -119,7 +119,12 @@ function applyFittedModel(gnorm, coefX, coefY, { poor, poorReasons } = {}) {
     toast('Calibration saved (accuracy may be low)');
   } else {
     hideRecalBanner();
-    setStatus('', 'calibrated & saved — check accuracy or follow');
+    // Name the eye mode in the persistent status line rather than only in a
+    // transient toast/console line: a user who asked "is one of my eyes
+    // throwing this off?" should be able to SEE the answer after calibrating,
+    // not have to know to open devtools.
+    const eye = state.eyeMode === 'both' ? 'both eyes' : `your ${state.eyeMode} eye`;
+    setStatus('', `calibrated & saved (using ${eye}) — check accuracy or follow`);
     toast('Calibration saved');
   }
 }

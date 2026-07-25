@@ -295,3 +295,26 @@ describe('dwell easing + auto smoothing (real-user findings, 2026-07-25)', () =>
     expect(suggestSmoothWin(null)).toBeNull();
   });
 });
+
+describe('buildPursuitCalibPoints preserves per-eye ratios (regression, 2026-07-25)', () => {
+  // Without this, chooseEyeMode sees no per-eye data on the pursuit path and
+  // silently returns 'both' every time -- which made the eye-selection
+  // feature dead for every user once pursuit became the primary flow.
+  it('carries rxL/ryL/rxR/ryR through to the fitted calibration points', () => {
+    const samples = [];
+    for (let i = 0; i < 40; i++) {
+      const tSec = (i / 40) * DEFAULT_DURATION_SEC;
+      samples.push({ tSec, rx: 0.1, ry: 0.2, bH: 0, bV: 0, rxL: 0.11, ryL: 0.21, rxR: 0.09, ryR: 0.19 });
+    }
+    const pts = buildPursuitCalibPoints(samples, DEFAULT_DURATION_SEC, 0);
+    expect(pts.length).toBeGreaterThan(0);
+    expect(pts.every((p) => p.rxL === 0.11 && p.ryL === 0.21 && p.rxR === 0.09 && p.ryR === 0.19)).toBe(true);
+  });
+
+  it('leaves them undefined (not zero) when the samples genuinely lack per-eye data, so chooseEyeMode still detects "no per-eye data"', () => {
+    const samples = [{ tSec: 1, rx: 0.1, ry: 0.2, bH: 0, bV: 0 }];
+    const [p] = buildPursuitCalibPoints(samples, DEFAULT_DURATION_SEC, 0);
+    expect(p.rxL).toBeUndefined();
+    expect(p.rxR).toBeUndefined();
+  });
+});
