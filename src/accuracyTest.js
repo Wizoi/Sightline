@@ -67,10 +67,21 @@ function finishTest(results, bright, noFace, frames, vHit, vTot) {
   const br = bright.length ? bright.reduce((a, b) => a + b, 0) / bright.length : 128;
   const noFaceRatio = frames ? noFace / frames : 0;
 
+  // Graded on `thirdRate` ("would you land on the right line?") rather than
+  // on raw average pixel error, which is what this used to do. Pixel error is
+  // a misleading thing to grade in THIS app: the reading band has real
+  // height, the turn delay ignores brief glances, and Snap quantizes to whole
+  // systems, so a gaze estimate that's off by a chunk of the screen very
+  // often still turns the page correctly. Grading it made the panel report
+  // "Poor" in red at 16-20% average error while the user was in fact landing
+  // on the right line 76-83% of the time — reported from real use as
+  // constantly red for results that were working fine, which is worse than
+  // uninformative: it tells someone their setup is broken when it isn't, and
+  // invites them to keep recalibrating a setup that was already good enough.
   let grade, gcolor;
-  if (overall < 0.06) { grade = 'Excellent 🎯'; gcolor = 'var(--good)'; }
-  else if (overall < 0.10) { grade = 'Good'; gcolor = 'var(--good)'; }
-  else if (overall < 0.16) { grade = 'Fair'; gcolor = 'var(--warn)'; }
+  if (thirdRate >= 0.95) { grade = 'Excellent 🎯'; gcolor = 'var(--good)'; }
+  else if (thirdRate >= 0.90) { grade = 'Good'; gcolor = 'var(--good)'; }
+  else if (thirdRate >= 0.70) { grade = 'Fair'; gcolor = 'var(--warn)'; }
   else { grade = 'Poor'; gcolor = 'var(--bad)'; }
 
   const pct = (x) => Math.round(x * 100);
@@ -91,7 +102,7 @@ function finishTest(results, bright, noFace, frames, vHit, vTot) {
   if (Math.abs(state.faceBox.cx - 0.5) > 0.18 || Math.abs(state.faceBox.cy - 0.5) > 0.2) s.push('Center yourself in the camera view, and put the camera roughly at eye level.');
   if (noFaceRatio > 0.2) s.push('Your face was frequently not detected — improve lighting or camera angle, and remove strong backlight.');
   if (vErr > 0.12 && vErr > hErr * 1.5) s.push('Up/down tracking is the weak spot (normal for webcams) — raise the camera toward eye level, use a taller reading band, and prefer Snap mode.');
-  if (overall >= 0.10) s.push('Recalibrate slowly: click each dot once and keep your eyes locked on it until it turns green. Glasses glare and hair over the eyes hurt accuracy too.');
+  if (thirdRate < 0.90) s.push('Recalibrate slowly: click each dot once and keep your eyes locked on it until it turns green. Glasses glare and hair over the eyes hurt accuracy too.');
   if (!s.length) s.push('Looks solid — you should get reliable page turns. Leave Drift on and tap R to Recenter if it drifts.');
 
   $('accsug').innerHTML = s.map((x) => '<li>' + x + '</li>').join('');
