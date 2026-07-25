@@ -304,7 +304,7 @@ export function findSectionTitle(pageItems, pageRows, knownNames, { leftMarginX 
 //
 // padBelow does the same job for a DIFFERENT, real, confirmed convention:
 // some engravings (a real 2008 scanned combo/jazz chart, "Fat Burger" --
-// see docs/PERSONAS.md persona 3) print the number BELOW the staff instead
+// see docs/personas/omr/investigation-log.md) print the number BELOW the staff instead
 // of above it, one per measure. Measured directly off that real file's
 // rendered pixels (converted to PDF points): the number's own ink sits only
 // ~2-9pt below the staff's bottom edge, with a genuine ~50pt+ gap before the

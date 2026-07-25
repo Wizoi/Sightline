@@ -5,13 +5,13 @@
 // UI renders. Split out specifically because this "glue" layer is where
 // real composition bugs have slipped through before (a buildSections()
 // name-fallback bug, a bootstrap-page self-match bug — see docs/
-// PERSONAS.md persona 3) despite every individual helper it calls
+// docs/personas/omr/investigation-log.md) despite every individual helper it calls
 // (refineMeasureCounts, filterMeasureNumberOutliers, detectMeasureNumberResets,
 // resolveBpmPerSystem) already having its own tests. None of these functions
 // touch pdf.js, canvas, or DOM — analyzeScore() itself still owns the
 // per-page rendering/detection loop that genuinely needs a real PDF.js Page
 // object, which is why that part isn't extracted here (see docs/
-// PERSONAS.md persona 3's Phase 1b write-up for why: no `canvas` npm
+// docs/personas/omr/investigation-log.md's Phase 1b write-up for why: no `canvas` npm
 // package/jsdom is installed in this project, and this project's QA persona
 // treats Playwright as ad hoc, session-only verification, never committed
 // test infra -- so anything that NEEDS page.render() stays integration-
@@ -71,7 +71,7 @@ export function resolveTempoSchedule(tempoMarkEntries, systemCount, currentBpm) 
 // measure-number `entries`, running filterMeasureNumberOutliers +
 // refineMeasureCounts SEPARATELY within each section's own system range
 // (re-based to section-local indices) so a part's own printed numbers never
-// bleed into a neighboring part's systems — see docs/PERSONAS.md persona 3
+// bleed into a neighboring part's systems — see docs/personas/omr/investigation-log.md
 // for the real bug this fixes (a later part's smaller, correctly-read
 // numbers looked like "outliers" relative to an earlier part's bigger ones
 // when refined in one whole-document pass).
@@ -100,7 +100,7 @@ function arraysEqual(a, b) {
 // image-only PDFs where the two OCR methods disagree) a switchable
 // `readings` alternative. measureNumberEntries (the real PDF text layer) is
 // merged into BOTH OCR candidates rather than being an either/or choice
-// gated on usedOcrAnywhere — see docs/PERSONAS.md persona 3, Finding 3: a
+// gated on usedOcrAnywhere — see docs/personas/omr/investigation-log.md, Finding 3: a
 // MIXED document (most pages OCR fallback, a few genuinely have real text)
 // must not have that handful's exact numbers discarded just because other
 // pages needed OCR. The merge is always safe: a given system's page took
@@ -125,7 +125,7 @@ export function chooseMeasureReadings({
 
 // The "measure counts vary a lot" warning (surfaced so a user can spot-check
 // the list below, per this project's general "surface the estimate for
-// review" pattern — see docs/PERSONAS.md persona 3) plus the "no systems"
+// review" pattern — see docs/personas/omr/investigation-log.md) plus the "no systems"
 // warning when analysis found nothing at all.
 export function computeWarnings(systemCount, refinedMeasures) {
   const warnings = [];

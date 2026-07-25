@@ -32,7 +32,7 @@ import { scoreOrientation, chooseRotation } from './lib/pageRotation.js';
 const ROTATION_PROBE_LONG_EDGE = 220;
 
 // Calibrated against real scores dumped from 3 real files (see docs/
-// PERSONAS.md section 3 for the full writeup) at this exact probe
+// docs/personas/omr/investigation-log.md for the full writeup) at this exact probe
 // resolution, not guessed:
 //   - MUST override: Teutonia.pdf p.3/22 (declares /Rotate 270, scores 89 at
 //     rotation 0 vs 0 at 270) and MonogramMarch.pdf p.4/28 (score 57 at 0)
@@ -192,7 +192,7 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
     });
     // boxBelow: a fallback candidate for engravings that print the number
     // BELOW the staff instead (a real scanned combo/jazz chart -- see
-    // docs/PERSONAS.md persona 3). Always located (cheap, pure ink-geometry,
+    // docs/personas/omr/investigation-log.md). Always located (cheap, pure ink-geometry,
     // no OCR yet); ocrNumbersByBox only actually OCRs it when `box` itself
     // fails the confidence gate, so a file where `box` already works is
     // unaffected by this being present.

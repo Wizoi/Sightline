@@ -141,7 +141,7 @@ describe('decide: up trigger stays reachable when the band sits near the top', (
 describe('decide: winkIntent explicit intent channel', () => {
   // Wink tracking calls decide() directly with a { dir, strength, t } intent
   // instead of synthesizing a fake rawGaze point (see winkTracking.js and
-  // PERSONAS.md section 5, item A2) — these mirror the equivalent rawGaze-
+  // docs/personas/05-realtime-control-engineer.md, item A2) — these mirror the equivalent rawGaze-
   // driven tests above, but via the intent channel, and with no rawGaze at
   // all (it should never be consulted while a fresh winkIntent is present).
 

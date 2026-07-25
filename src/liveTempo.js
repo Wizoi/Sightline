@@ -5,7 +5,7 @@
 //
 // Not covered by an automated test — it only does something inside a real
 // AudioContext/getUserMedia, which Vitest doesn't provide, and this project
-// has no Playwright/e2e harness (see docs/PERSONAS.md persona 8). Verified
+// has no Playwright/e2e harness (see docs/personas/08-qa-test-strategist.md). Verified
 // manually against a live mic instead. The pure logic it wires together
 // (lib/tempoCorrection.js, lib/tempoSchedule.js) is unit tested.
 

@@ -154,7 +154,7 @@ function renderSummary(result) {
     // reaches selectSection() at all, which silently left this suggestion
     // dead for that whole common case ever since it was introduced. Found
     // directly while verifying the OCR/Bravura work above against real
-    // single-section files (2026-07-23) -- see docs/PERSONAS.md persona 3.
+    // single-section files (2026-07-23) -- see docs/personas/omr/investigation-log.md.
     renderTimeSigSuggestion(state.autoScroll.sections[0]);
   }
 }

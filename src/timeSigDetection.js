@@ -14,8 +14,7 @@ import { ocrDigitsBox } from './ocr.js';
 //     used for image-only-PDF measure numbers (see ocr.js), PSM 8 (single
 //     word), separately for the numerator and denominator halves.
 // Both report a confidence on the same 0-1 scale; pickBestTimeSig() (pure,
-// lib/timeSigMatch.js) takes whichever is higher. See docs/PERSONAS.md
-// persona 3's 2026-07-23 write-up for what this comparison actually found on
+// lib/timeSigMatch.js) takes whichever is higher. See docs/personas/omr/investigation-log.md's 2026-07-23 write-up for what this comparison actually found on
 // real files, and why "highest confidence wins" was the chosen combination
 // rather than a fixed primary/fallback order.
 
@@ -182,7 +181,7 @@ export function findInkBlobs(isInk, rowMin, rowMax, colStart, colEnd, opts = {})
 // if no blob produced a matchable digit pair at all.
 //
 // Tries up to 7 candidates (not the original 3) -- confirmed a real miss
-// against a real file (see docs/PERSONAS.md persona 3, 2026-07-23): a busy
+// against a real file (see docs/personas/omr/investigation-log.md, 2026-07-23): a busy
 // 5-flat key signature produces 4 accidental blobs before the real
 // time-signature glyph, which the original `slice(1, 4)` window never
 // reached at all.
@@ -223,7 +222,7 @@ async function detectTimeSignatureGrid(isInk, rowMin, rowMax, colStart, colEnd) 
 // Requiring BOTH halves to independently recognize a digit at all (num.value
 // AND den.value non-null) -- not any confidence floor -- is what actually
 // filters out non-digit blobs here: confirmed directly against 5 real files
-// (see docs/PERSONAS.md persona 3, 2026-07-23) that a spurious blob (a clef
+// (see docs/personas/omr/investigation-log.md, 2026-07-23) that a spurious blob (a clef
 // swirl, a key-signature flat) reads as a digit on AT MOST one side by
 // chance, never cleanly on both, so this gate alone did all the real
 // filtering work in every test file. Once past that gate, the pair's

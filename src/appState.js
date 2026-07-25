@@ -71,7 +71,7 @@ export const state = {
   // Explicit "scroll up"/"scroll down" signal from wink tracking, consumed
   // directly by lib/followLogic.js's decide() (`winkIntent` input) instead of
   // being synthesized into a fake rawGaze point — see src/tracking/
-  // winkTracking.js and PERSONAS.md section 5. null whenever no wink is
+  // winkTracking.js and docs/personas/05-realtime-control-engineer.md. null whenever no wink is
   // currently held (or the active tracking type isn't wink).
   winkIntent: null,
 

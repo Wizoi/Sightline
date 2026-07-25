@@ -4,7 +4,7 @@
 // streams — not hand-typed {str, x, y} arrays like scoreText.test.js's unit
 // tests. This is the Phase 1b fixture work: a committed regression test that
 // actually renders/parses a real PDF, targeting the specific structural
-// conditions that caused real bugs (see docs/PERSONAS.md persona 3).
+// conditions that caused real bugs (see docs/personas/omr/investigation-log.md).
 //
 // Fixtures are built IN-MEMORY at test time via `pdf-lib` (a pure-JS PDF
 // author, no native deps) rather than committed as static .pdf binary
@@ -28,7 +28,7 @@
 // have caught a real pdfjs API-shape regression (e.g. a getTextContent()
 // item field renamed) that a hand-typed fixture never could.
 //
-// What this DOESN'T cover (see docs/PERSONAS.md persona 3's Phase 1b
+// What this DOESN'T cover (see docs/personas/omr/investigation-log.md's Phase 1b
 // write-up for the full reasoning): anything that needs page.render() to a
 // canvas -- staff-line/barline pixel detection, the rotation-probe's
 // per-orientation ink scoring. No `canvas` npm package or jsdom is
@@ -41,7 +41,7 @@
 // (pageSystemsDetailed, estimateMeasureCount) fed literal row/ink arrays
 // (systemDetection.test.js, barlineDetection.test.js) — including two new
 // regression tests added directly from real corpus-dumped gap data (see
-// Finding 1 in docs/PERSONAS.md). Where this fixture file needs a "systems
+// Finding 1 in docs/personas/omr/investigation-log.md). Where this fixture file needs a "systems
 // on this page" input (real code gets that from the pixel pass), it uses an
 // explicit, clearly-labeled SYNTHETIC systemsForText array positioned to
 // match where this fixture's own text was drawn — standing in for the one

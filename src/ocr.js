@@ -23,7 +23,7 @@
 // timeSigDetection.js's OCR-based time-signature reading (ocrDigitsBox()
 // below) — same lazy self-hosted worker, same PSM-8 single-word digit
 // recognition, applied to a numerator/denominator crop instead of a measure
-// number. See docs/PERSONAS.md persona 3's 2026-07-23 write-up for why this
+// number. See docs/personas/omr/investigation-log.md's 2026-07-23 write-up for why this
 // was tried (a cheaper, zero-new-dependency alternative to bundling
 // engraving-font reference glyphs) and what it actually measured.
 
@@ -60,7 +60,7 @@ async function getWorker() {
 // crossing straight through it is not. Time-signature digits sit DIRECTLY ON
 // the staff (unlike a measure number, which sits in the clear margin above/
 // below it, never crossed by a staff line) -- confirmed directly against a
-// real crop (see docs/PERSONAS.md persona 3, 2026-07-23): Tesseract fails
+// real crop (see docs/personas/omr/investigation-log.md, 2026-07-23): Tesseract fails
 // completely (0% confidence, empty string) on a raw numerator/denominator
 // crop with staff lines crossing the glyph, and correctly reads the same
 // glyph once those rows are blanked out first. Only ever applied to the
@@ -142,7 +142,7 @@ export async function ocrDigitsBox(canvas, box, opts = {}) {
 // candidate (locateMeasureNumber); `boxBelow` (optional) is the mirrored
 // below-the-staff candidate (locateMeasureNumberBelow) for engravings that
 // print the number under the staff instead (a real 2008 scanned combo/jazz
-// chart, "Fat Burger" -- see docs/PERSONAS.md persona 3). Tried in that
+// chart, "Fat Burger" -- see docs/personas/omr/investigation-log.md). Tried in that
 // order and the first one whose OCR passes the confidence gate wins, so a
 // file where `box` already reads correctly is completely unaffected by
 // `boxBelow` even being present -- purely an additional fallback, not a

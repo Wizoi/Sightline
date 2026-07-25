@@ -86,7 +86,7 @@ export function locateMeasureNumber(isInk, {
 // Mirrors locateMeasureNumber for a different, real, confirmed engraving
 // convention: some scores print the per-measure number BELOW the staff
 // instead of above it (a real 2008 scanned combo/jazz chart, "Fat Burger" --
-// see docs/PERSONAS.md persona 3 -- prints a number under literally every
+// see docs/personas/omr/investigation-log.md -- prints a number under literally every
 // measure, with rehearsal letters in boxes above instead). systemBottom is
 // the row of the BOTTOM staff line (the caller's rowMax). bandBelowNear/Far
 // are calibrated directly against that real file's own rendered pixels: its
@@ -101,7 +101,7 @@ export function locateMeasureNumber(isInk, {
 // the caller OCRs whatever this locates through the same digit-only,
 // confidence-gated Tesseract pass already relied on to reject every other
 // non-number crop this heuristic-only (no OCR) locator can't itself tell
-// apart from a real number (see docs/PERSONAS.md persona 3's OCR-pipeline
+// apart from a real number (see docs/personas/omr/investigation-log.md's OCR-pipeline
 // write-up) -- a mis-located clef tail is expected to score low confidence
 // and be silently dropped, the same "surfaced only when confident, never a
 // wrong guess" pattern as the rest of this pipeline.

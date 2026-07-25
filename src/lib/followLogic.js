@@ -110,7 +110,7 @@ export function deadZoneBounds(cfg, H) {
 // direction from — workable, but fragile: the synthesized point had to
 // exactly track decide()'s own (capped, per-direction) dead-zone geometry to
 // avoid landing back inside the zone it was meant to clear, which broke once
-// already (see PERSONAS.md section 5, finding on `deadZoneBounds`/
+// already (see docs/personas/05-realtime-control-engineer.md, finding on `deadZoneBounds`/
 // `winkTracking.js`). A real, direct intent channel can't reintroduce that
 // bug class at all, because it never derives a direction from geometry to
 // begin with. Still timestamp-gated (same 250ms freshness window as

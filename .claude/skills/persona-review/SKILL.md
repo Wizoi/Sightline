@@ -1,11 +1,12 @@
 ---
 name: persona-review
-description: Fan a proposed Sightline feature or change out to all 10 domain-expert personas (docs/PERSONAS.md, .claude/agents/) for parallel impact analysis, then synthesize one combined report. Use whenever scoping, designing, or evaluating a new Sightline feature or significant change — every persona must respond, even if only to explicitly decline with "no impact."
+description: Fan a proposed Sightline feature or change out to all 10 domain-expert personas (docs/personas/, .claude/agents/) for parallel impact analysis, then synthesize one combined report. Use whenever scoping, designing, or evaluating a new Sightline feature or significant change — every persona must respond, even if only to explicitly decline with "no impact."
 ---
 
 # Persona review
 
-Runs Sightline's 10-persona "development team" (see [docs/PERSONAS.md](../../../docs/PERSONAS.md))
+Runs Sightline's 10-persona "development team" (see
+[docs/PERSONAS.md](../../../docs/PERSONAS.md) for the roster, or `docs/personas/` directly)
 against a single feature or change, in parallel, and produces one combined report. The point is
 coverage, not unanimity: a persona with nothing to add should say so explicitly in one line
 rather than being silently skipped — a visible "no impact" is a real, load-bearing signal (it
@@ -44,18 +45,18 @@ review on X" or "get the team's take on X," treat X as the feature/change to ana
 
    > Sightline feature/change under review: {{feature description}}.
    >
-   > Analyze this strictly from your persona's domain lens (see your section of
-   > docs/PERSONAS.md — read it first). Structure your reply as:
+   > Analyze this strictly from your persona's domain lens (see your own file under
+   > docs/personas/ — read it first). Structure your reply as:
    > 1. **Verdict**: "No impact" or "Impact" (pick one — don't hedge).
    > 2. If **No impact**: one or two sentences saying why this genuinely doesn't touch your
    >    domain. Do not manufacture a concern just to have something to say.
    > 3. If **Impact**: a concise assessment (roughly 100–200 words) covering: what specifically
    >    in your domain is affected, any relevant prior knowledge/verdict already on record in
-   >    PERSONAS.md, concrete risks or open questions, and a recommendation (proceed / proceed
-   >    with a specific caveat / needs a spike first / don't do this).
+   >    your persona file, concrete risks or open questions, and a recommendation (proceed /
+   >    proceed with a specific caveat / needs a spike first / don't do this).
    >
    > Be concrete and specific to this feature — generic domain background the reader can already
-   > get from PERSONAS.md isn't useful here.
+   > get from your persona file isn't useful here.
 
 3. **Synthesize one combined report** from the 10 replies — don't just concatenate them. Format:
 
@@ -74,9 +75,9 @@ review on X" or "get the team's take on X," treat X as the feature/change to ana
 
 4. **Offer to persist durable findings.** If any persona's analysis produced something worth
    keeping past this conversation (a new constraint discovered, a risk worth tracking, a verdict
-   reached), offer to write it into the relevant section of `docs/PERSONAS.md` — that file is the
-   team's shared memory, and per each persona's own instructions, new findings belong there, not
-   only in this chat.
+   reached), offer to write it into that persona's own file under `docs/personas/` — those files
+   are the team's shared memory, and per each persona's own instructions, new findings belong
+   there, not only in this chat.
 
 ## Notes
 

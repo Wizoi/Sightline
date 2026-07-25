@@ -12,8 +12,7 @@ const PRESETS_KEY = 'eyepagescroller.presets';
 
 // ---------------------------------------------------------------------------
 // Declarative settings registry (backlog F2 — see
-// docs/reviews/2026-07-19-fable-review.md finding F2, and docs/PERSONAS.md
-// persona 9). One table describes every persisted setting, slider or not, so
+// docs/reviews/2026-07-19-fable-review.md finding F2, and docs/personas/09-feature-strategy-lead.md). One table describes every persisted setting, slider or not, so
 // save/load/presets/reset/reset-and-every-onclick-handler all iterate this
 // same list instead of each hand-duplicating get/set/DOM-sync logic (the
 // pre-refactor shape had that duplicated across bind(), currentToggles(),

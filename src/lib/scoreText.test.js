@@ -686,8 +686,7 @@ describe('detectMeasureNumberResets', () => {
 
   describe('plausible-section-span guard (systemCount option)', () => {
     // Real dumped `primaryEntries` from a real, especially poor-OCR duets
-    // collection ("Lazarus 3 Grand Artistic Duets" -- see docs/PERSONAS.md
-    // persona 3) -- every one of these 9 candidate resets individually
+    // collection ("Lazarus 3 Grand Artistic Duets" -- see docs/personas/omr/investigation-log.md) -- every one of these 9 candidate resets individually
     // passes the drop/climb checks above (that's why the OLD behavior,
     // exercised by calling without `systemCount`, still finds all 9), but
     // the sections they'd introduce span 9-143 systems while their own
