@@ -3,10 +3,16 @@ import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { cfg, state } from './appState.js';
 import { $, scoreEl, emptyEl, toast, syncAutoScrollButton, refreshControlStates } from './ui.js';
 import { detectSystems } from './systemDetection.js';
+import { hashBytes } from './analysisCache.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
 export async function loadPdf(arrayBuffer) {
+  // Hash BEFORE handing the buffer to pdf.js, which takes ownership of it and
+  // may detach it -- afterwards there are no bytes left to read. This is what
+  // the analysis cache keys on (see analysisCache.js); null (no crypto.subtle
+  // outside a secure context) simply means no caching.
+  state.pdfHash = await hashBytes(arrayBuffer);
   try {
     state.pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   } catch (err) {

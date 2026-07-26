@@ -127,7 +127,12 @@ async function main() {
       console.log(`Analyzing ${gt.file}...`);
       const page = await browser.newPage();
       try {
-        await page.goto(baseUrl, { waitUntil: 'load' });
+        // ?noCache=1 forces the real detector to run (src/analysisCache.js).
+        // A benchmark that scored a cached detection would be measuring the
+        // run that populated the cache, not the code under test -- any
+        // regression introduced since would be invisible, which is the one
+        // place a silently-correct cache would do real damage.
+        await page.goto(`${baseUrl}${baseUrl.includes('?') ? '&' : '?'}noCache=1`, { waitUntil: 'load' });
         const app = await analyzeFile(page, pdfPath, { loadTimeoutMs, analyzeTimeoutMs });
         perFile.push(scoreFile(gt, app));
       } catch (err) {

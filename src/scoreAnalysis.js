@@ -18,6 +18,7 @@ import {
   ocrNumbersByBox, ocrNumbersByStrip, ocrPageWords, terminateOcr,
 } from './ocr.js';
 import { scoreOrientation, chooseRotation } from './lib/pageRotation.js';
+import { readDetection, writeDetection } from './analysisCache.js';
 
 // Some source PDFs carry a wrong /Rotate flag on individual pages — a real
 // scanning/assembly artifact (confirmed on two real combined-score PDFs: a
@@ -380,7 +381,17 @@ function isForceOcrRequested() {
   return new URLSearchParams(location.search).get('forceOcr') === '1';
 }
 
-export async function analyzeScore() {
+/* The expensive half: everything that reads the PDF's pixels and text layer.
+ * A pure function of the document -- it touches `state` only for
+ * `state.pdfDoc`, never for a user setting, which is precisely what makes its
+ * result safe to cache against the file's content hash (analysisCache.js).
+ *
+ * Keep it that way. If this ever needs a value the user can change, that
+ * value belongs on the other side of the seam (in analyzeScore below) or in
+ * the cache key -- otherwise a cached run silently pins the setting to
+ * whatever it was the first time the piece was analyzed.
+ */
+async function detectScore() {
   const forceOcr = isForceOcrRequested();
   const systemBands = [];
   const measuresPerSystem = [];
@@ -655,14 +666,6 @@ export async function analyzeScore() {
 
   if (ocrWorkerTouched) await terminateOcr(); // free the OCR worker thread + model
 
-  // Whether any page's resolved rotation differs from its declared one --
-  // the caller (autoScrollUI.js) uses this to trigger one renderAll() pass
-  // so the visible canvases match what was just analyzed (system-band
-  // highlighting is computed against the RESOLVED geometry, so a still-
-  // sideways displayed page would otherwise disagree with it).
-  const rotationOverridesChanged = !overridesEqual(state.autoScroll.pageRotationOverrides, rotationOverrides);
-  state.autoScroll.pageRotationOverrides = rotationOverrides;
-
   // Section boundaries: a matched instrument-name title page (above) PLUS a
   // printed measure number resetting (e.g. back to 1) -- the latter needs no
   // instrument-name bootstrap at all, so it's what still splits a booklet of
@@ -678,6 +681,48 @@ export async function analyzeScore() {
   // point -- try to find one on THAT boundary's own first page (see
   // fillMissingSectionNames()'s own doc comment above analyzeScore()).
   await fillMissingSectionNames(boundaries, systemBands, rotationOverrides);
+
+  // Plain data only -- this is what gets stored in IndexedDB, so it has to
+  // survive a structured-clone round trip with nothing left behind.
+  return {
+    systemBands, measuresPerSystem, boundaries, measureNumberEntries,
+    ocrEntriesBox, ocrEntriesStrip, tempoMarkEntries, timeSigByIndex,
+    rotationOverrides, usedOcrAnywhere,
+  };
+}
+
+/* The cheap half, plus the cache. Everything below depends on live user
+ * settings (the tempo slider, beats per measure), so it is recomputed on
+ * every analyze whether the detection came from the cache or from the PDF --
+ * it is microseconds of array work against tens of seconds of OCR. */
+export async function analyzeScore() {
+  // forceOcr changes what detectScore() produces, so it has to be part of the
+  // cache identity -- see cacheKey(). Any future detection-affecting flag
+  // goes here too.
+  const variant = isForceOcrRequested() ? 'forceOcr' : '';
+  const cached = await readDetection(state.pdfHash, variant);
+  const detection = cached || await detectScore();
+  if (!cached) {
+    // Failure to store is not failure to analyze -- writeDetection reports
+    // false (quota, private browsing) and the run stands on its own.
+    await writeDetection(state.pdfHash, detection, variant);
+  }
+  const {
+    systemBands, measuresPerSystem, boundaries, measureNumberEntries,
+    ocrEntriesBox, ocrEntriesStrip, tempoMarkEntries, timeSigByIndex,
+    rotationOverrides, usedOcrAnywhere,
+  } = detection;
+
+  // Whether any page's resolved rotation differs from its declared one --
+  // the caller (autoScrollUI.js) uses this to trigger one renderAll() pass
+  // so the visible canvases match what was just analyzed (system-band
+  // highlighting is computed against the RESOLVED geometry, so a still-
+  // sideways displayed page would otherwise disagree with it). Compared
+  // against live state, so it stays out of the cached payload: whether a
+  // re-render is needed depends on what is on screen NOW, not on what was
+  // true when this document was first analyzed.
+  const rotationOverridesChanged = !overridesEqual(state.autoScroll.pageRotationOverrides, rotationOverrides);
+  state.autoScroll.pageRotationOverrides = rotationOverrides;
 
   // Collapse the printed ♩=N marks into one tempo per system, carried
   // forward from each mark until the next one overrides it -- null when no

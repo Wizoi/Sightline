@@ -39,6 +39,7 @@ export const state = {
   staffPriorOn: false,
 
   trackingType: 'wink',
+  pdfHash: null,   // SHA-256 of the loaded PDF's bytes; the analysis cache key (analysisCache.js)
   winkStrength: 0.5,
   winkScores: { left: 0, right: 0 },   // live debug readout — see settings.js
   // null = not calibrated, fall back to lib/winkLogic.js's fixed defaults.

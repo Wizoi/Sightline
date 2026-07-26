@@ -10,6 +10,9 @@ export default [
       sourceType: 'module',
       globals: {
         ...globals.browser,
+        // Injected at build time by vite.config.js define (see
+        // src/analysisCache.js) -- not a real browser global.
+        __BUILD_ID__: 'readonly',
       },
     },
     rules: {
