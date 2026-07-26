@@ -175,8 +175,36 @@ async function renderPageCanvas(page, viewport1x, targetW, rotation) {
 const OCR_BOX_WIDTH = 2600;
 const OCR_STRIP_WIDTH = 1500;
 async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, ah, rotation, needsWordItems) {
+  // Both renders first, together -- the STRIP recognition below is this
+  // page's long pole and can't start until its canvas exists.
+  const [boxCanvas, stripCanvas] = await Promise.all([
+    renderPageCanvas(page, viewport1x, OCR_BOX_WIDTH, rotation),
+    renderPageCanvas(page, viewport1x, OCR_STRIP_WIDTH, rotation),
+  ]);
+
+  /* STRIP method: OCR the whole left margin at once and correlate by position.
+   *
+   * Issued BEFORE the BOX jobs deliberately. This is one ~1s recognition that
+   * cannot be split, while BOX is a dozen ~70ms ones that fill whatever
+   * workers are left; queueing the many short jobs first left this sitting
+   * behind them in the pool (measured: 5.5s of pure queue wait across
+   * KingCotton's 34 OCR pages) and pushed out the very thing everything else
+   * finishes ahead of.
+   *
+   * WORDS (only when the caller needs it -- an image-only page with no text
+   * layer at all; see the call site) reuses the SAME stripCanvas: a full-page
+   * render, not yet cropped to the left margin, which ocrNumbersByStrip does
+   * itself. So this costs one more recognize(), not another page.render().
+   * See ocr.js's ocrPageWords for why it can't share STRIP's recognize() call
+   * (that one runs with the digit-only whitelist active, so it is structurally
+   * incapable of returning a letter). Each crops its own copy, so they run
+   * concurrently too. */
+  const stripPromise = ocrNumbersByStrip(stripCanvas, viewport1x.width, viewport1x.height);
+  const wordsPromise = needsWordItems
+    ? ocrPageWords(stripCanvas, viewport1x.width, viewport1x.height)
+    : Promise.resolve([]);
+
   // BOX method: locate a tight box per system on the high-res render, OCR each.
-  const boxCanvas = await renderPageCanvas(page, viewport1x, OCR_BOX_WIDTH, rotation);
   const data = boxCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, boxCanvas.width, boxCanvas.height).data;
   const isInk = (r, c) => {
     if (r < 0 || r >= boxCanvas.height || c < 0 || c >= boxCanvas.width) return false;
@@ -205,24 +233,15 @@ async function ocrPageNumbers(page, viewport1x, systemsOnPage, systemsForText, a
     });
     if (box || boxBelow) boxes.push({ systemIndex: s.index, box, boxBelow });
   }
-  const boxEntries = await ocrNumbersByBox(boxCanvas, boxes);
-
-  // STRIP method: OCR the whole left margin on the lower-res render, correlate.
-  const stripCanvas = await renderPageCanvas(page, viewport1x, OCR_STRIP_WIDTH, rotation);
-  const stripItems = await ocrNumbersByStrip(stripCanvas, viewport1x.width, viewport1x.height);
-  const stripEntries = extractMeasureNumbers(stripItems, systemsForText);
-
-  // WORDS method (only when the caller actually needs it -- an image-only
-  // page with no real text layer at all; see the call site): reuses the
-  // SAME already-rendered stripCanvas (a full-page render, not yet cropped
-  // to the left margin -- ocrNumbersByStrip does that cropping itself) so
-  // this costs one more recognize() call, not another page.render(). See
-  // ocr.js's ocrPageWords for why this needs its own pass rather than being
-  // read off the same recognize() call as the STRIP method above (that one
-  // runs with the digit-only whitelist active).
-  const wordItems = needsWordItems ? await ocrPageWords(stripCanvas, viewport1x.width, viewport1x.height) : [];
-
-  return { boxEntries, stripEntries, wordItems };
+  // All three passes are in flight by now; this is just where they're joined.
+  const [boxEntries, stripItems, wordItems] = await Promise.all([
+    ocrNumbersByBox(boxCanvas, boxes), stripPromise, wordsPromise,
+  ]);
+  return {
+    boxEntries,
+    stripEntries: extractMeasureNumbers(stripItems, systemsForText),
+    wordItems,
+  };
 }
 
 // Scans the rendered score for systems (the same staff-line detection Snap

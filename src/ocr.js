@@ -34,6 +34,8 @@
 //             PDF's real text layer already is (lib/scoreText.js). See
 //             ocrPageWords() below and docs/personas/omr/investigation-log.md.
 
+import { createLeasePool } from './lib/leasePool.js';
+
 // A recognized word's canvas-pixel bbox -> a pdfjs-style text point { x, y } in
 // PDF points (y flips: the text layer's origin is the page's bottom-left).
 // pxPerPt = canvas.width / pageWidthPts. Pure and exported for unit testing.
@@ -43,38 +45,71 @@ export function bboxToPoint(bbox, pxPerPt, pageHeightPts) {
   return { x: cx / pxPerPt, y: pageHeightPts - cy / pxPerPt };
 }
 
-let workerPromise = null;
+/* --- Worker pool ---------------------------------------------------------
+ *
+ * Recognition dominates analysis time and is the only part that does: on a
+ * real 40-page scanned score (KingCotton) a profiled run spent 73s of its
+ * 81s inside these calls -- 451 per-number BOX recognitions at ~72ms and 34
+ * whole-margin STRIP recognitions at ~1.0s -- against ~3s for every
+ * page.render() in the entire pipeline combined. Those recognitions are
+ * mutually independent (BOX and STRIP are deliberately separate readings of
+ * the same page, and each box is its own image), but they used to run
+ * strictly serially on ONE worker, i.e. on one core of however many the
+ * machine has. This pool exists to use the rest.
+ *
+ * Each job leases a worker for its whole recognize() call, which also fixes
+ * a hazard the single-worker design had to defend against by hand: the four
+ * kinds of pass here need different Tesseract parameters (digits-only vs.
+ * letters, four different page-segmentation modes), and with one shared
+ * worker every call site had to re-set its own parameters immediately before
+ * recognizing, trusting that nothing interleaved in between. A leased worker
+ * cannot be reconfigured underneath a job, so the parameters are now a
+ * property OF the job (see PROFILES) rather than a global that each caller
+ * defensively rewrites.
+ */
 
-// Shared worker, ONE instance reused across every page/method in an analysis
-// run. `tessedit_char_whitelist` used to be set exactly once here, at
-// creation, on the (then-true) assumption that only digit-reading ever
-// happened through this worker. That stopped being true once ocrPageWords()
-// (below) was added to read real letters (instrument names/section titles)
-// off scanned pages for fillMissingSectionNames/collectKnownNames-style
-// matching (see docs/personas/omr/investigation-log.md) -- a whitelist set once and never
-// touched again would silently apply to EVERY call for the rest of the
-// worker's life, corrupting whichever kind of pass didn't run first. So
-// nothing sets `tessedit_char_whitelist` here anymore: every digit-reading
-// call site (recognizeDigitsInBox, ocrNumbersByStrip) now (re)sets it to
-// digits-only immediately before its own recognize() call, and ocrPageWords
-// clears it immediately before its own -- each pass is self-contained and
-// safe to interleave in any order within one page's analysis, rather than
-// relying on nothing else ever mutating shared worker state.
-async function getWorker() {
-  if (workerPromise) return workerPromise;
-  workerPromise = (async () => {
-    const base = import.meta.env.BASE_URL + 'tesseract/';
-    const { createWorker } = await import('tesseract.js');
-    const worker = await createWorker('eng', 1, {
-      workerPath: base + 'worker.min.js',
-      corePath: base + 'tesseract-core-lstm.wasm.js', // non-SIMD LSTM: works everywhere
-      langPath: base,
-      gzip: true, // model is eng.traineddata.gz
-    });
-    return worker;
-  })();
-  return workerPromise;
+// Bounded well below hardwareConcurrency: each worker is a real thread that
+// loads its own copy of the ~15MB LSTM model, so this trades memory for
+// wall-clock and there's little left to win past a handful. Minus one to
+// leave the main thread a core for page rendering and the UI.
+const MAX_WORKERS = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
+
+const PROFILES = {
+  // One isolated number (PSM 8 "single word"): the BOX measure-number path
+  // and the time-signature digit path.
+  digitsBox: { tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '8' },
+  // One uniform block running down the left column (PSM 6): the STRIP path.
+  digitsStrip: { tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '6' },
+  // Ordinary title/running text, letters included (PSM 3, no whitelist):
+  // the WORDS path. An empty whitelist means "no restriction" -- with the
+  // digit whitelist left set, the engine is structurally incapable of ever
+  // returning a letter, which is what this pass exists to read.
+  words: { tessedit_char_whitelist: '', tessedit_pageseg_mode: '3' },
+};
+
+async function spawnWorker() {
+  const base = import.meta.env.BASE_URL + 'tesseract/';
+  const { createWorker } = await import('tesseract.js');
+  return createWorker('eng', 1, {
+    workerPath: base + 'worker.min.js',
+    corePath: base + 'tesseract-core-lstm.wasm.js', // non-SIMD LSTM: works everywhere
+    langPath: base,
+    gzip: true, // model is eng.traineddata.gz
+  });
 }
+
+// The lease bookkeeping itself lives in lib/leasePool.js, where it can be
+// unit-tested without a browser or a Tesseract worker -- pool sizing and
+// hand-off bugs are invisible in normal operation and catastrophic when they
+// happen (a leaked lease deadlocks the analysis).
+const pool = createLeasePool({
+  max: MAX_WORKERS,
+  spawn: spawnWorker,
+  configure: (worker, profile) => worker.setParameters(PROFILES[profile]),
+});
+
+// Runs one recognition on a leased worker configured for `profileName`.
+const withWorker = (profileName, fn) => pool.run(profileName, fn);
 
 // Blanks any row that's dark across nearly its full width -- a real digit
 // stroke is always narrower than the full crop width, but a staff line
@@ -117,7 +152,7 @@ function stripStaffLineRows(ctx, w, h, { minDarkFrac = 0.85 } = {}) {
 // box is { x0, y0, x1, y1 } in canvas pixels. The box is cropped to its own
 // canvas and upscaled — tesseract.js's `rectangle` option is unreliable
 // in-browser, and a small crop reads better enlarged.
-async function recognizeDigitsInBox(worker, canvas, box, { padPx = 6, upscale = 3, stripStaffLines = false } = {}) {
+async function recognizeDigitsInBox(canvas, box, { padPx = 6, upscale = 3, stripStaffLines = false } = {}) {
   const x = Math.max(0, Math.round(box.x0 - padPx));
   const y = Math.max(0, Math.round(box.y0 - padPx));
   const w = Math.min(canvas.width - x, Math.round(box.x1 - box.x0 + 2 * padPx));
@@ -131,19 +166,17 @@ async function recognizeDigitsInBox(worker, canvas, box, { padPx = 6, upscale = 
   cctx.fillRect(0, 0, crop.width, crop.height);
   cctx.drawImage(canvas, x, y, w, h, 0, 0, crop.width, crop.height);
   if (stripStaffLines) stripStaffLineRows(cctx, crop.width, crop.height);
-  // Explicitly (re)set the digit-only whitelist right before this call --
-  // see getWorker()'s doc comment for why this can no longer be assumed set
-  // once at worker creation (ocrPageWords, below, clears it for its own,
-  // interleaved-in-time letter-reading pass on the same shared worker).
-  await worker.setParameters({ tessedit_char_whitelist: '0123456789' });
-  const { data } = await worker.recognize(crop.toDataURL('image/png'));
+  // The crop is built before leasing a worker -- it's ordinary canvas work
+  // and holding a pool slot through it would serialize the cheap part along
+  // with the expensive one.
+  const { data } = await withWorker('digitsBox', (worker) => worker.recognize(crop));
   const digits = (data.text || '').replace(/\D+/g, '');
   return { digits: digits || null, confidence: data.confidence };
 }
 
-async function recognizeBox(worker, canvas, box, opts = {}) {
+async function recognizeBox(canvas, box, opts = {}) {
   const { minConfidence = 55, ...rest } = opts;
-  const { digits, confidence } = await recognizeDigitsInBox(worker, canvas, box, rest);
+  const { digits, confidence } = await recognizeDigitsInBox(canvas, box, rest);
   if (!digits || confidence < minConfidence) return null;
   return parseInt(digits, 10);
 }
@@ -158,9 +191,7 @@ async function recognizeBox(worker, canvas, box, opts = {}) {
 // here would bake in an assumption about which method should win that
 // belongs to that caller, not this shared OCR plumbing.
 export async function ocrDigitsBox(canvas, box, opts = {}) {
-  const worker = await getWorker();
-  await worker.setParameters({ tessedit_pageseg_mode: '8' });
-  const { digits, confidence } = await recognizeDigitsInBox(worker, canvas, box, { stripStaffLines: true, ...opts });
+  const { digits, confidence } = await recognizeDigitsInBox(canvas, box, { stripStaffLines: true, ...opts });
   return { value: digits ? parseInt(digits, 10) : null, confidence };
 }
 
@@ -173,18 +204,20 @@ export async function ocrDigitsBox(canvas, box, opts = {}) {
 // file where `box` already reads correctly is completely unaffected by
 // `boxBelow` even being present -- purely an additional fallback, not a
 // competing candidate. Returns [{ systemIndex, measureNumber }].
+// Boxes are independent images, so they go out to the pool together rather
+// than one after another -- this is the bulk of the recognition work on a
+// scanned page (one box per system). Note what stays SEQUENTIAL: `boxBelow`
+// is only tried when `box` itself failed the confidence gate, so the fallback
+// still costs nothing on a file where the primary candidate reads fine.
+// Results keep input order (Promise.all preserves it), matching the previous
+// loop exactly.
 export async function ocrNumbersByBox(canvas, boxes) {
-  const worker = await getWorker();
-  await worker.setParameters({ tessedit_pageseg_mode: '8' }); // single word = one isolated number
-  // recognizeBox -> recognizeDigitsInBox (re)sets the digit whitelist itself
-  // per box, so nothing extra needed here — see recognizeDigitsInBox.
-  const out = [];
-  for (const { systemIndex, box, boxBelow } of boxes) {
-    let num = box ? await recognizeBox(worker, canvas, box) : null;
-    if (num == null && boxBelow) num = await recognizeBox(worker, canvas, boxBelow);
-    if (num != null) out.push({ systemIndex, measureNumber: num });
-  }
-  return out;
+  const results = await Promise.all(boxes.map(async ({ systemIndex, box, boxBelow }) => {
+    let num = box ? await recognizeBox(canvas, box) : null;
+    if (num == null && boxBelow) num = await recognizeBox(canvas, boxBelow);
+    return num == null ? null : { systemIndex, measureNumber: num };
+  }));
+  return results.filter(Boolean);
 }
 
 // --- Method STRIP ---------------------------------------------------------
@@ -194,18 +227,12 @@ export async function ocrNumbersByBox(canvas, boxes) {
 // ~1/3 width keeps a workable aspect ratio; a thin strip reads as empty), then
 // x-filtered so only the far-left number column survives.
 export async function ocrNumbersByStrip(canvas, pageWidthPts, pageHeightPts, { cropFrac = 0.33, leftFrac = 0.2, minConfidence = 55 } = {}) {
-  const worker = await getWorker();
-  // Explicitly (re)set the digit-only whitelist right before this call — see
-  // getWorker()'s doc comment: this is no longer set once at worker
-  // creation, since ocrPageWords (below) needs the SAME shared worker with
-  // no whitelist at all for its own, interleaved-in-time letter-reading pass.
-  await worker.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '6' }); // one uniform block down the left column
   const cropW = Math.max(1, Math.round(canvas.width * cropFrac));
   const strip = document.createElement('canvas');
   strip.width = cropW;
   strip.height = canvas.height;
   strip.getContext('2d').drawImage(canvas, 0, 0, cropW, canvas.height, 0, 0, cropW, canvas.height);
-  const { data } = await worker.recognize(strip.toDataURL('image/png'), {}, { blocks: true });
+  const { data } = await withWorker('digitsStrip', (worker) => worker.recognize(strip, {}, { blocks: true }));
 
   const pxPerPt = canvas.width / pageWidthPts;
   const maxX = pageWidthPts * leftFrac; // keep only the far-left number column
@@ -256,19 +283,12 @@ export async function ocrNumbersByStrip(canvas, pageWidthPts, pageHeightPts, { c
 // PSM 6/8/11 — this is ordinary running/title text, not one isolated number
 // or a single left-hand column.
 export async function ocrPageWords(canvas, pageWidthPts, pageHeightPts, { topFrac = 0.3, minConfidence = 55 } = {}) {
-  const worker = await getWorker();
-  // Explicitly clear the whitelist (empty string = no restriction) right
-  // before this call -- see getWorker()'s doc comment. Never leaves the
-  // whitelist cleared for anyone else: every digit-reading call site above
-  // re-sets it to digits-only immediately before its own recognize() call,
-  // so this is safe to interleave in either order.
-  await worker.setParameters({ tessedit_char_whitelist: '', tessedit_pageseg_mode: '3' });
   const cropH = Math.max(1, Math.round(canvas.height * topFrac));
   const crop = document.createElement('canvas');
   crop.width = canvas.width;
   crop.height = cropH;
   crop.getContext('2d').drawImage(canvas, 0, 0, canvas.width, cropH, 0, 0, canvas.width, cropH);
-  const { data } = await worker.recognize(crop.toDataURL('image/png'), {}, { blocks: true });
+  const { data } = await withWorker('words', (worker) => worker.recognize(crop, {}, { blocks: true }));
 
   const pxPerPt = canvas.width / pageWidthPts;
   const items = [];
@@ -286,11 +306,13 @@ export async function ocrPageWords(canvas, pageWidthPts, pageHeightPts, { topFra
   return items;
 }
 
-// Frees the worker (a dedicated OS thread + the loaded model). Call once the
-// analysis pass that used OCR has finished. No-op if OCR never ran.
+// Frees every pooled worker (each is a thread plus a loaded model). Call once
+// the analysis pass that used OCR has finished. No-op if OCR never ran.
+// Waiters are dropped rather than resolved: reaching here with jobs still
+// queued would mean the analysis that owns them has already finished, and
+// handing them a terminated worker would be worse than leaving them pending.
 export async function terminateOcr() {
-  if (!workerPromise) return;
-  const p = workerPromise;
-  workerPromise = null;
-  try { (await p).terminate(); } catch { /* already gone */ }
+  await pool.drain(async (worker) => {
+    try { await worker.terminate(); } catch { /* already gone */ }
+  });
 }
