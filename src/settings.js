@@ -140,6 +140,16 @@ function applyToggles(t) {
 //   - Eye-tracking smoothing: smooths a continuously-varying gaze position;
 //     the winkIntent branch never runs decide()'s EMA smoothing step at all.
 function applyTrackingTypeUI() {
+  // The dropdown is re-synced FROM state here rather than by each caller.
+  // state.trackingType is the single source of truth for which mode is
+  // active; the <select> is a view of it. Keeping the assignment next to the
+  // row-visibility work means no path can update one without the other --
+  // which is exactly the shape of a reported bug where the dropdown named one
+  // tracking type while the panel showed the other's controls. That was never
+  // reproduced (save/reload and browser form-restoration on reload were both
+  // tested and are consistent), so this is not a fix for a known root cause;
+  // it makes the class of divergence unrepresentable instead.
+  $('trackingType').value = state.trackingType;
   const isWink = state.trackingType === 'wink';
   const needsCalib = getActiveTracking().needsCalibration;
   $('calibBtn').style.display = needsCalib ? '' : 'none';
@@ -307,12 +317,11 @@ export function initSettingsUI() {
     o.value = t.id; o.textContent = t.label;
     $('trackingType').appendChild(o);
   });
-  $('trackingType').value = state.trackingType;
-  applyTrackingTypeUI();
+  applyTrackingTypeUI();   // also seeds the dropdown from state
   const trackingEntry = reg({
     key: 'tracking', kind: 'value', presence: 'string',
     get: () => state.trackingType,
-    set: (v) => { setTrackingType(v); $('trackingType').value = state.trackingType; applyTrackingTypeUI(); },
+    set: (v) => { setTrackingType(v); applyTrackingTypeUI(); },
   });
   $('trackingType').onchange = () => {
     trackingEntry.set($('trackingType').value);
