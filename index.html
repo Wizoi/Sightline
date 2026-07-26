@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sightline — hands-free sight-reading</title>
 <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-  <script type="module" crossorigin src="./assets/index-dtpnE7gw.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CC_lYA60.css">
+  <script type="module" crossorigin src="./assets/index-CJrs4Plj.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BzOhiaxJ.css">
 </head>
 <body>
 
@@ -78,18 +78,24 @@
 
     <div class="group">The reading band</div>
 
-    <label for="dz">Reading zone size <span class="val" id="dzv"></span></label>
-    <input type="range" id="dz" min="4" max="40" value="18" />
-    <div class="ends"><span>small</span><span>large</span></div>
-
-    <label for="bp">Where you read on screen <span class="val" id="bpv"></span></label>
-    <input type="range" id="bp" min="12" max="55" value="50" />
-    <div class="ends"><span>near top</span><span>middle</span></div>
-
+    <div class="sub">Shape the band by dragging it on the page: the <b>middle</b> moves it up or down, the <b>top or bottom edge</b> resizes it. On a touch screen, pinch the band to resize.</div>
     <div id="rightZoneRow">
+      <div class="sub">Drag the <b>line-end marker</b> sideways to change how far along a line you look before the page turns.</div>
+    </div>
+
+    <!-- These three sliders moved onto the band itself (see bandDrag.js) —
+         they're spatial properties of something already on screen, so a
+         slider was the wrong control. Kept in the DOM because settings.js's
+         registry treats them as the store for these values: save, restore,
+         and per-piece presets all read/write these elements, and bandDrag
+         edits go through them so none of that has to change. -->
+    <div id="retiredBandControls" hidden>
+      <label for="dz">Reading zone size <span class="val" id="dzv"></span></label>
+      <input type="range" id="dz" min="4" max="40" value="18" />
+      <label for="bp">Where you read on screen <span class="val" id="bpv"></span></label>
+      <input type="range" id="bp" min="12" max="55" value="50" />
       <label for="rt">Turn the page when my eyes reach… <span class="val" id="rtv"></span></label>
       <input type="range" id="rt" min="40" max="88" value="62" />
-      <div class="ends"><span>mid-line</span><span>line end</span></div>
     </div>
 
     <div class="group">How it scrolls</div>
