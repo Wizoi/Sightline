@@ -1930,3 +1930,49 @@ assumed correct from the spike alone).**
   the 2026-07-24 entry's "not yet wired into `timeSigDetection.js`" framing is now stale — it *is*
   wired in, wins outright over the pixel path when it finds something, and falls through cleanly
   when it doesn't.
+
+## 2026-07-26 — Slicing the STRIP OCR pass across workers: **negative finding, dropped**
+
+**Context.** After the OCR worker pool landed (`src/ocr.js`), KingCotton's Analyze went 81.0s →
+44.2s, and profiling showed the remaining time had one clear shape: the per-number BOX pass
+parallelizes well (44.8s of recognition compressed into 15.0s of wall time across 4 workers),
+but the STRIP pass is **one ~1.0s recognition per page that cannot be split**, 34 of them, run
+inside a sequential page loop. That accounted for ~39s of the remaining 44s — a serial long pole
+no amount of pool width can touch (Amdahl).
+
+**Hypothesis.** Cut the left-margin strip into N horizontal slices and recognize them
+concurrently. Cuts would be placed in the whitespace *between* systems so no printed measure
+number is ever bisected, keeping each slice a column of numbers in context (PSM 6) rather than
+degenerating into the per-number BOX method — which would have destroyed the whole point of
+having two independent readings for the user to choose between.
+
+**Spiked the risky assumption first**, before building the gap-aligned cut selection: equal-height
+slices behind a `?slices=N` URL flag, purely to measure whether N smaller recognitions actually
+beat one large one. Tesseract has fixed per-call setup cost, and that was the assumption most
+likely to sink the idea.
+
+**Result — it does not pay.** KingCotton, `?noCache=1` so every run does real work:
+
+| slices | wall clock |
+|---|---|
+| 1 (today's behaviour) | 52.4s |
+| 2 | **55.9s — slower** |
+| 4 | 47.0s |
+
+Two slices is *worse* than not slicing. Four is ~10% better than baseline, which is inside the
+run-to-run variance this suite already exhibits (the same build measured 44.2s and 52.4s on
+different runs; a documented earlier case swung 66.3%/75.5%/79.4% on identical code). Per-call
+overhead eats essentially the whole theoretical gain. Measure counts also differed from baseline
+at both slice counts, though that part is *expected* of the equal-slice spike (it bisects numbers)
+and is not evidence against the gap-aligned design — the speed result is, and the speed result is
+what the spike existed to obtain.
+
+**Dropped.** Not worth the accuracy risk of changing Tesseract's segmentation context for a gain
+indistinguishable from noise. Recorded here rather than retried, in the same spirit as the
+barline-continuity negative finding.
+
+**What changed the value of this work anyway:** the detection cache (`src/analysisCache.js`,
+committed the same day) takes repeat analysis of the same PDF to ~1.8s, so the cold path is now
+paid once per document ever rather than once per session. Remaining ideas for the cold path, if it
+is ever worth revisiting: pipelining OCR across pages (invasive — the page loop carries
+cross-page state) rather than subdividing within a page.
