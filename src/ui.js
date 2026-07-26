@@ -34,6 +34,11 @@ export function applyBand() {
   bandEl.style.top = (cfg.bandPos * 100) + 'vh';
   bandEl.style.height = (cfg.deadZoneFrac * 2 * 100) + 'vh';
   $('rightMark').style.left = (cfg.rightZoneFrac * 100) + 'vw';
+  // Wink mode turns the page on a deliberate wink, not on where the gaze
+  // lands, so the line-end trigger has nothing to mark there. It's now a
+  // drag handle as well as an indicator, so leaving it up would offer an
+  // adjustment that does nothing.
+  $('rightMark').style.display = (state.trackingType === 'wink') ? 'none' : 'block';
 }
 
 // Keeps the single Start/Pause auto-scroll button in sync with playback and

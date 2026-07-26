@@ -152,6 +152,7 @@ function applyTrackingTypeUI() {
   $('rightZoneRow').classList.toggle('hidden', isWink);
   $('sheetMarginRow').classList.toggle('hidden', isWink);
   $('poseToggle').classList.toggle('hidden', isWink);
+  applyBand();   // the on-screen line-end marker is iris-only
   refreshControlStates();
 }
 

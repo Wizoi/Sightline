@@ -138,18 +138,25 @@ while paused.
 
 ## Tuning
 
-Every player, webcam, and room is a little different, so a minute with these sliders pays off.
-They're grouped into **the reading band** and **how it scrolls**. A few only make sense for Iris
-tracking (they watch a screen position, which Wink tracking doesn't have) and disappear from the
-panel automatically when Wink tracking is active — that's expected, not a bug. **Eye-tracking
-smoothing** and **Ignore glances past the sides** are tucked under the **Advanced** disclosure at
-the bottom of the Eye/Wink tab rather than sitting loose in the main list.
+Every player, webcam, and room is a little different, so a minute spent adjusting pays off.
+A few controls only make sense for Iris tracking (they watch a screen position, which Wink
+tracking doesn't have) and disappear when Wink tracking is active — that's expected, not a bug.
+**Eye-tracking smoothing** and **Ignore glances past the sides** are tucked under the **Advanced**
+disclosure at the bottom of the Eye/Wink tab rather than sitting loose in the main list.
+
+**The reading band you shape by dragging it, not from the panel** — it's right there on the page,
+so you can see the effect as you make it:
+
+| On the band | What it changes | Do it when… |
+|---|---|---|
+| Drag the **middle** up or down | Where on screen you read | You want more look-ahead of what's coming — move it toward the top |
+| Drag the **top or bottom edge** (or **pinch** it on a touch screen) | How tall the reading zone is | It turns while you're still on a line — make it taller; you want it to advance sooner — make it shorter |
+| Drag the **line-end marker** sideways *(Iris only)* | How far along a line you look before the page turns | Turns come too late — drag it left; it turns before you've finished the line — drag it right |
+
+Everything else is a slider in the side panel, under **how it scrolls**:
 
 | Slider | What it does | Turn it… |
 |---|---|---|
-| **Reading zone size** | Height of the band you read in | Up if it turns while you're still on a line; down to advance sooner |
-| **Where you read on screen** | Band position, top ↔ middle | Toward the top for more look-ahead of what's coming |
-| **Turn the page when my eyes reach…** *(Iris only)* | How far right before it advances | Left to turn earlier; right to require the very end of the line |
 | **Page scroll speed** | How fast it moves | Up for quick page turns, down for slow passages |
 | **Eye-tracking smoothing** *(Iris only, Advanced)* | Steady vs. responsive | Up if it jitters; down if it lags your eyes |
 | **Wait before turning** | Delay before a turn commits | Up to ignore more stray glances; down for snappier turns |

@@ -15,10 +15,12 @@ import { initSettingsUI, loadSettings } from './settings.js';
 import { initAutoScrollUI, pauseAutoScrollUI } from './autoScrollUI.js';
 import { startAutoScrollLoop, repositionAutoScroll } from './autoScrollController.js';
 import { initTabsUI } from './tabsUI.js';
+import { initBandDrag } from './bandDrag.js';
 
 initSettingsUI();
 initAutoScrollUI();
 initTabsUI();
+initBandDrag();
 
 /* ---------------------------------------------------------------------- *
  *  Primary controls
@@ -70,7 +72,9 @@ $('recalDismiss').onclick = hideRecalBanner;
 // Foot pedal / mouse click anywhere on the score = pause toggle
 // (clicks on the control panel and overlays are ignored).
 document.addEventListener('mousedown', (e) => {
-  if (e.target.closest && e.target.closest('#panel, #calib, #pursuitCalib, #acctest, #accres, #winkTest, #winkTestRes, #recal')) return;
+  // #band handles its own presses (bandDrag.js) and re-fires this click
+  // itself for a tap that didn't turn into a drag.
+  if (e.target.closest && e.target.closest('#panel, #band, #calib, #pursuitCalib, #acctest, #accres, #winkTest, #winkTestRes, #recal')) return;
   if (!$('runBtn').disabled) $('runBtn').click();
 });
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {

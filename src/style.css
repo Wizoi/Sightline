@@ -44,11 +44,26 @@ body {
   background: var(--band);
   border-top: 1px solid rgba(76,201,240,0.35);
   border-bottom: 1px solid rgba(76,201,240,0.35);
-  pointer-events: none;
+  /* Interactive now (see bandDrag.js): drag the edges to resize, the middle
+     to reposition, the right marker to move the line-end trigger. A tap that
+     doesn't travel still falls through to pause, so making this clickable
+     doesn't cost the click-anywhere-to-pause behavior. */
+  pointer-events: auto;
+  touch-action: none;   /* we handle pinch ourselves; don't let the page zoom */
   z-index: 5;
   display: none;
 }
 #rightMark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: 0.85; }
+/* Widen the grab target well beyond the 2px line without changing how it
+   looks -- a 2px hit area is unusable with a finger and fiddly with a mouse. */
+#rightMark::before { content: ''; position: absolute; top: 0; bottom: 0; left: -9px; right: -9px; }
+/* Edge grips: purely an affordance, showing the band's edges can be pulled. */
+#band::before, #band::after {
+  content: ''; position: absolute; left: 50%; transform: translateX(-50%);
+  width: 42px; height: 3px; border-radius: 2px; background: var(--accent); opacity: 0.5;
+}
+#band::before { top: 2px; }
+#band::after { bottom: 2px; }
 #rightMark::after { content: 'line-end →'; position: absolute; top: -18px; right: 2px; font-size: 10px; color: var(--accent); white-space: nowrap; }
 .sysMark {
   position: absolute; left: 0; right: 0; height: 0;
@@ -266,4 +281,4 @@ kbd { background:#21262d; border:1px solid #30363d; border-bottom-width:2px; bor
    than relying only on the [hidden] attribute, since #panel .row sets
    display:flex on a descendant and an explicit rule here removes any doubt
    about which wins. Delete this rule to bring them back. */
-#retiredControls { display: none; }
+#retiredControls, #retiredBandControls { display: none; }
