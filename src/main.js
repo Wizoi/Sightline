@@ -1,6 +1,6 @@
 import './style.css';
 import { state } from './appState.js';
-import { $, toast, setStatus, showRecalBanner, hideRecalBanner, applyBand, refreshControlStates } from './ui.js';
+import { $, toast, setStatus, showRecalBanner, hideRecalBanner, applyBand, refreshControlStates, isTempoMode } from './ui.js';
 import { loadPdf, renderAll } from './pdf.js';
 import { startCamera } from './camera.js';
 import {
@@ -69,13 +69,30 @@ $('winkTestClose').onclick = () => { $('winkTestRes').style.display = 'none'; };
 $('recalNow').onclick = () => { hideRecalBanner(); runPursuitCalibration(); };
 $('recalDismiss').onclick = hideRecalBanner;
 
+/* The pedal, Space, and a click anywhere on the score all mean the same
+ * thing: "pause or resume what I'm doing". They used to be wired straight to
+ * the Follow-eyes button, which is only that thing in Eye/Wink mode -- in
+ * Tempo mode, pressing the pedal to pause the auto-scroll instead STARTED
+ * eye following (which in turn paused the auto-scroll and handed scrolling
+ * to the camera). The two modes are alternatives, so the toggle has to
+ * resolve to whichever one is actually in play. */
+function togglePlayback() {
+  // Whatever is running wins, even if the user has since switched tabs to
+  // look at something -- that's the thing they're asking to stop.
+  if (state.autoScroll.playing) { $('autoScrollStart').click(); return; }
+  if (state.following) { $('runBtn').click(); return; }
+  // Nothing running: start the mode the user is actually in.
+  const btn = isTempoMode() ? $('autoScrollStart') : $('runBtn');
+  if (!btn.disabled) btn.click();
+}
+
 // Foot pedal / mouse click anywhere on the score = pause toggle
 // (clicks on the control panel and overlays are ignored).
 document.addEventListener('mousedown', (e) => {
   // #band handles its own presses (bandDrag.js) and re-fires this click
   // itself for a tap that didn't turn into a drag.
   if (e.target.closest && e.target.closest('#panel, #band, #calib, #pursuitCalib, #acctest, #accres, #winkTest, #winkTestRes, #recal')) return;
-  if (!$('runBtn').disabled) $('runBtn').click();
+  togglePlayback();
 });
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
   navigator.mediaDevices.addEventListener('devicechange', () => {
@@ -106,7 +123,7 @@ window.addEventListener('keydown', (e) => {
   // previously had no exit at all short of completing them, which left one
   // sitting open (and covered) behind whatever the user opened next.
   if (e.code === 'Escape') { cancelCalibration(); cancelPursuitCalibration(); return; }
-  if (e.code === 'Space') { e.preventDefault(); $('runBtn').click(); }
+  if (e.code === 'Space') { e.preventDefault(); togglePlayback(); }
   else if (e.code === 'ArrowDown') window.scrollBy(0, 60);
   else if (e.code === 'ArrowUp') window.scrollBy(0, -60);
   // Page-turn foot pedals commonly send PageUp/PageDown keycodes rather than

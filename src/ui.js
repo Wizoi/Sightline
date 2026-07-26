@@ -21,16 +21,23 @@ export function toast(msg) {
   toast._t = setTimeout(() => t.classList.remove('show'), 1400);
 }
 
+// Which of the two top-level modes the user has selected. The tab is the
+// mode: Eye/Wink following and Tempo auto-scroll are alternatives that both
+// drive window.scrollTo() on their own rAF loop, so exactly one of them owns
+// scrolling at a time. Everything that needs to know which — the reading
+// band, and the pedal/Space/click-anywhere toggle — asks here rather than
+// re-reading the tab's class, so there is one answer to disagree with.
+export function isTempoMode() {
+  const tab = $('tabAutoScroll');
+  return !!tab && tab.classList.contains('active');
+}
+
 // The reading band + "line-end" marker are eye/wink-tracking concepts —
 // hidden whenever the Tempo tab is the active one (not just while
 // auto-scroll happens to be playing — it was still showing while paused
-// on that tab, which is exactly as irrelevant) or while auto-scroll is
-// actively playing even if the user has switched back to the Eye/Wink tab
-// to peek at something (tabs are a pure visibility toggle, not a stop —
-// see tabsUI.js — so auto-scroll can still be running underneath).
+// on that tab, which is exactly as irrelevant).
 export function applyBand() {
-  const tempoTabActive = $('tabAutoScroll') && $('tabAutoScroll').classList.contains('active');
-  bandEl.style.display = (state.showBand && !state.autoScroll.playing && !tempoTabActive) ? 'block' : 'none';
+  bandEl.style.display = (state.showBand && !state.autoScroll.playing && !isTempoMode()) ? 'block' : 'none';
   bandEl.style.top = (cfg.bandPos * 100) + 'vh';
   bandEl.style.height = (cfg.deadZoneFrac * 2 * 100) + 'vh';
   $('rightMark').style.left = (cfg.rightZoneFrac * 100) + 'vw';
